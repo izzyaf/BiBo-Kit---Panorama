@@ -8,6 +8,5 @@ public class OpenCV_ImageStitching {
         Mat m  = Mat.eye(3, 3, CvType.CV_8UC1);
         System.out.println("m = " + m.dump());
 	}
-
 }
 
