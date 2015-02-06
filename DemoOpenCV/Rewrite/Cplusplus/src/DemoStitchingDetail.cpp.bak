@@ -23,7 +23,6 @@
 #include <opencv2/stitching/detail/warpers.hpp>
 #include <opencv2/stitching/warpers.hpp>
 #include <opencv2/stitching/stitcher.hpp>
-#include <sys/stat.h>
 
 using namespace std;
 using namespace cv;
@@ -31,27 +30,24 @@ using namespace cv::detail;
 
 // Default constant parameters
 vector<string> imgNames;
-bool preview = true, useGPU = false, do_wave_correct = true,
+bool preview = false, useGPU = false, do_wave_correct = true,
 		save_graph = false;
-double registration_resol = 0.3, seam_estimation_resol = 0.08,
-		compositing_resol = 0.6, confidence_threshold = 0.8;
+double registration_resol = 0.6, seam_estimation_resol = 0.1,
+		compositing_resol = -1.0, confidence_threshold = 1.0;
 string features_finder_type = "surf", bundleadjuster_cost_func = "ray",
-		bundleadjuster_refine_mask = "xxxxx", warp_type = "cylindrical",
-		seam_find_type = "dp_colorgrad";
+		bundleadjuster_refine_mask = "xxxxx", warp_type = "spherical",
+		seam_find_type = "gc_color";
 WaveCorrectKind wave_correct = detail::WAVE_CORRECT_HORIZ;
-string graph_dest, result_dest = "resultModxxx.jpg";
-int expos_comp_type = ExposureCompensator::GAIN, blend_type =
+string graph_dest, result_dest = "result.jpg";
+int expos_comp_type = ExposureCompensator::GAIN_BLOCKS, blend_type =
 		Blender::MULTI_BAND;
 float match_conf = 0.3f, blend_strength = 5;
 
 int num_images;
 double seam_work_aspect = 1;
 double work_scale = 1;
-string inFileName = "inputpath.txt", outFileName = "runtimeROI.txt";
-ifstream ifs;
+ifstream ifs("inputpath.txt", ifstream::in);
 fstream ofs;
-vector<Mat> full_img;
-vector<Mat> img;
 
 /*static int parseInputArg(int numFile, string *nameList) {
  if (numFile == 1)
@@ -65,7 +61,7 @@ vector<Mat> img;
 //Finding features
 void findFeatures(vector<Size>& full_img_sizes, vector<ImageFeatures>& features,
 		vector<Mat>& images) {
-	//Mat full_img, img;
+	Mat full_img, img;
 	double seam_scale = 1;
 	bool is_work_scale_set = false, is_seam_scale_set = false;
 	Ptr<FeaturesFinder> finder;
@@ -82,15 +78,15 @@ void findFeatures(vector<Size>& full_img_sizes, vector<ImageFeatures>& features,
 		return;
 	}
 
-#pragma omp parallel for
 	for (int i = 0; i < num_images; ++i) {
-		full_img[i] = imread(imgNames[i]);
-		full_img_sizes[i] = full_img[i].size();
+		full_img = imread(imgNames[i]);
 
-		/*		if (full_img[i].empty())
-		 return;*/
+		full_img_sizes[i] = full_img.size();
+
+		if (full_img.empty())
+			return;
 		if (registration_resol < 0) {
-			img[i] = full_img[i];
+			img = full_img;
 			work_scale = 1;
 			is_work_scale_set = true;
 		} else {
@@ -98,46 +94,37 @@ void findFeatures(vector<Size>& full_img_sizes, vector<ImageFeatures>& features,
 				work_scale = min(1.0,
 						sqrt(
 								registration_resol * 1e6
-										/ full_img[i].size().area()));
+										/ full_img.size().area()));
 				is_work_scale_set = true;
 			}
-			resize(full_img[i], img[i], Size(), work_scale, work_scale);
+			resize(full_img, img, Size(), work_scale, work_scale);
 		}
 		if (!is_seam_scale_set) {
 			seam_scale = min(1.0,
-					sqrt(
-							seam_estimation_resol * 1e6
-									/ full_img[i].size().area()));
+					sqrt(seam_estimation_resol * 1e6 / full_img.size().area()));
 			seam_work_aspect = seam_scale / work_scale;
 			is_seam_scale_set = true;
 		}
 
-		(*finder)(img[i], features[i]);
+		(*finder)(img, features[i]);
 		features[i].img_idx = i;
 
-		resize(full_img[i], img[i], Size(), seam_scale, seam_scale);
-		images[i] = img[i].clone();
+		resize(full_img, img, Size(), seam_scale, seam_scale);
+		images[i] = img.clone();
 	}
 
 	finder->collectGarbage();
-	//full_img.release();
-	//img.release();
+	full_img.release();
+	img.release();
 }
 
 //Pairwise matching
 int pairwiseMatching(vector<ImageFeatures>& features, vector<Mat>& images,
 		vector<Size>& full_img_sizes, vector<CameraParams>& cameras,
-		float& warped_image_scale, vector<MatchesInfo>& pairwise_matches,
-		const Mat& matchMask) {
+		float& warped_image_scale, vector<MatchesInfo>& pairwise_matches) {
 
 	BestOf2NearestMatcher matcher(useGPU, match_conf);
-
-	/*	for (int i = 0; i < num_images - 1; ++i) {
-	 matchMask.at<char>(i, i + 1) = 1;
-	 }*/
-	matcher(features, pairwise_matches, matchMask);
-
-	//matcher(features, pairwise_matches);
+	matcher(features, pairwise_matches);
 	matcher.collectGarbage();
 
 	// Check if we should save matches graph
@@ -166,14 +153,12 @@ int pairwiseMatching(vector<ImageFeatures>& features, vector<Mat>& images,
 
 	// Check if we still have enough images
 	int tmp = static_cast<int>(imgNames.size());
-	if (tmp < 2) {
+	if (tmp < 2){
 		return -1;
-	} else if (tmp < num_images) {
-		ofs << left << setw(3) << tmp << "/" << setw(3) << num_images;
+	}else if (tmp < num_images){
 		num_images = tmp;
 		return 0;
-	} else
-		return 1;
+	}else return 1;
 
 }
 
@@ -242,7 +227,7 @@ void estimate_refineCamera(vector<MatchesInfo> pairwise_matches,
 
 //Warping images (auxiliary)...
 void createWarper(const float& warped_image_scale,
-		Ptr<WarperCreator>& warper_creator, vector<Ptr<RotationWarper> >& warper) {
+		Ptr<WarperCreator>& warper_creator, Ptr<RotationWarper>& warper) {
 	// Warp images and their masks
 	if (useGPU && gpu::getCudaEnabledDeviceCount() > 0) {
 		if (warp_type == "plane")
@@ -288,28 +273,24 @@ void createWarper(const float& warped_image_scale,
 		cout << "Can't create the following warper '" << warp_type << "'\n";
 		return;
 	}
-#pragma omp parallel for
-	for (int i=0; i<num_images; i++)
-	warper[i] = warper_creator->create(
+	warper = warper_creator->create(
 			static_cast<float>(warped_image_scale * seam_work_aspect));
 }
 
 void warpImages(vector<Mat>& images, const vector<CameraParams>& cameras,
 		vector<Point>& corners, vector<Size>& sizes,
-		vector<Ptr<RotationWarper> >& warper, vector<Mat>& masks_warped,
+		Ptr<RotationWarper>& warper, vector<Mat>& masks_warped,
 		Ptr<ExposureCompensator>& compensator) {
 
 	vector<Mat> images_warped(num_images);
 	vector<Mat> masks(num_images);
 	// Prepare images masks
-#pragma omp parallel for
 	for (int i = 0; i < num_images; ++i) {
 		masks[i].create(images[i].size(), CV_8U);
 		masks[i].setTo(Scalar::all(255));
 	}
 	// Warp images and their masks
-	vector<Mat> images_warped_f(num_images);
-#pragma omp parallel for
+
 	for (int i = 0; i < num_images; ++i) {
 		Mat_<float> K;
 		cameras[i].K().convertTo(K, CV_32F);
@@ -319,14 +300,16 @@ void warpImages(vector<Mat>& images, const vector<CameraParams>& cameras,
 		K(1, 1) *= swa;
 		K(1, 2) *= swa;
 
-		corners[i] = warper[i]->warp(images[i], K, cameras[i].R, INTER_LINEAR,
+		corners[i] = warper->warp(images[i], K, cameras[i].R, INTER_LINEAR,
 				BORDER_REFLECT, images_warped[i]);
 		sizes[i] = images_warped[i].size();
 
-		warper[i]->warp(masks[i], K, cameras[i].R, INTER_NEAREST, BORDER_CONSTANT,
+		warper->warp(masks[i], K, cameras[i].R, INTER_NEAREST, BORDER_CONSTANT,
 				masks_warped[i]);
-		images_warped[i].convertTo(images_warped_f[i], CV_32F);
 	}
+	vector<Mat> images_warped_f(num_images);
+	for (int i = 0; i < num_images; ++i)
+		images_warped[i].convertTo(images_warped_f[i], CV_32F);
 	compensator = ExposureCompensator::createDefault(expos_comp_type);
 	compensator->feed(corners, images_warped, masks_warped);
 	Ptr<SeamFinder> seam_finder;
@@ -367,294 +350,217 @@ void warpImages(vector<Mat>& images, const vector<CameraParams>& cameras,
 }
 
 //Composing and blending
-void composePano(float& warped_image_scale, vector<Ptr<RotationWarper> >& warper,
+void composePano(float warped_image_scale, Ptr<RotationWarper> warper,
 		const Ptr<WarperCreator>& warper_creator, vector<CameraParams>& cameras,
 		const vector<Size>& full_img_sizes, vector<Point>& corners,
 		vector<Size>& sizes, Ptr<ExposureCompensator>& compensator,
 		const vector<Mat>& masks_warped, Mat& result) {
-	//Mat full_img, img;
+	Mat full_img, img;
 	Ptr<Blender> blender;
 	bool is_compose_scale_set = false;
 	double compose_scale = 1;
+	Mat img_warped, img_warped_s;
+	Mat dilated_mask, seam_mask, mask, mask_warped;
 	double compose_work_aspect = 1;
-	if (!is_compose_scale_set) {
-		if (compositing_resol > 0)
-			compose_scale = min(1.0,
-					sqrt(compositing_resol * 1e6 / full_img[0].size().area()));
-		is_compose_scale_set = true;
-
-		// Compute relative scales
-		compose_work_aspect = compose_scale / work_scale;
-
-		// Update warped image scale
-		warped_image_scale *= static_cast<float>(compose_work_aspect);
-#pragma omp parallel for
-		for (int i=0; i<num_images; i++)
-		warper[i] = warper_creator->create(warped_image_scale);
-
-		// Update corners and sizes
-#pragma omp parallel for
-		for (int i = 0; i < num_images; ++i) {
-			// Update intrinsics
-			cameras[i].focal *= compose_work_aspect;
-			cameras[i].ppx *= compose_work_aspect;
-			cameras[i].ppy *= compose_work_aspect;
-
-			// Update corner and size
-			Size sz = full_img_sizes[i];
-			if (std::abs(compose_scale - 1) > 1e-1) {
-				sz.width = cvRound(full_img_sizes[i].width * compose_scale);
-				sz.height = cvRound(full_img_sizes[i].height * compose_scale);
-			}
-
-			Mat K;
-			cameras[i].K().convertTo(K, CV_32F);
-			Rect roi = warper[i]->warpRoi(sz, K, cameras[i].R);
-			corners[i] = roi.tl();
-			sizes[i] = roi.size();
-		}
-	}
-	if (blender.empty()) {
-		blender = Blender::createDefault(blend_type, useGPU);
-		Size dst_sz = resultRoi(corners, sizes).size();
-		float blend_width = sqrt(static_cast<float>(dst_sz.area()))
-				* blend_strength / 100.f;
-		if (blend_width < 1.f)
-			blender = Blender::createDefault(Blender::NO, useGPU);
-		else if (blend_type == Blender::MULTI_BAND) {
-			MultiBandBlender* mb =
-					dynamic_cast<MultiBandBlender*>(static_cast<Blender*>(blender));
-			mb->setNumBands(
-					static_cast<int>(ceil(log(blend_width) / log(2.)) - 1.));
-
-		} else if (blend_type == Blender::FEATHER) {
-			FeatherBlender* fb =
-					dynamic_cast<FeatherBlender*>(static_cast<Blender*>(blender));
-			fb->setSharpness(1.f / blend_width);
-
-		}
-		blender->prepare(corners, sizes);
-	}
-	vector<Mat> mask_warped(num_images), img_warped_s(num_images);
-	vector<Mat> dilated_mask(num_images), seam_mask(num_images);
-	vector<Mat> mask(num_images), img_warped(num_images);
-#pragma omp parallel for
 	for (int img_idx = 0; img_idx < num_images; ++img_idx) {
+
 		// Read image and resize it if necessary
-		//full_img = imread(imgNames[img_idx]);
-		//Mat mask_warped, img_warped_s;
+		full_img = imread(imgNames[img_idx]);
+		if (!is_compose_scale_set) {
+			if (compositing_resol > 0)
+				compose_scale = min(1.0,
+						sqrt(compositing_resol * 1e6 / full_img.size().area()));
+			is_compose_scale_set = true;
+
+			// Compute relative scales
+			compose_work_aspect = compose_scale / work_scale;
+
+			// Update warped image scale
+			warped_image_scale *= static_cast<float>(compose_work_aspect);
+			warper = warper_creator->create(warped_image_scale);
+
+			// Update corners and sizes
+			for (int i = 0; i < num_images; ++i) {
+				// Update intrinsics
+				cameras[i].focal *= compose_work_aspect;
+				cameras[i].ppx *= compose_work_aspect;
+				cameras[i].ppy *= compose_work_aspect;
+
+				// Update corner and size
+				Size sz = full_img_sizes[i];
+				if (std::abs(compose_scale - 1) > 1e-1) {
+					sz.width = cvRound(full_img_sizes[i].width * compose_scale);
+					sz.height = cvRound(
+							full_img_sizes[i].height * compose_scale);
+				}
+
+				Mat K;
+				cameras[i].K().convertTo(K, CV_32F);
+				Rect roi = warper->warpRoi(sz, K, cameras[i].R);
+				corners[i] = roi.tl();
+				sizes[i] = roi.size();
+			}
+		}
 		if (abs(compose_scale - 1) > 1e-1)
-			resize(full_img[img_idx], img[img_idx], Size(), compose_scale,
-					compose_scale);
+			resize(full_img, img, Size(), compose_scale, compose_scale);
 		else
-			img[img_idx] = full_img[img_idx];
-		//full_img[img_idx].release();
-		Size img_size = img[img_idx].size();
+			img = full_img;
+		full_img.release();
+		Size img_size = img.size();
 
 		Mat K;
 		cameras[img_idx].K().convertTo(K, CV_32F);
 
 		// Warp the current image
-		warper[img_idx]->warp(img[img_idx], K, cameras[img_idx].R, INTER_LINEAR,
-				BORDER_REFLECT, img_warped[img_idx]);
+		warper->warp(img, K, cameras[img_idx].R, INTER_LINEAR, BORDER_REFLECT,
+				img_warped);
 
 		// Warp the current image mask
-		mask[img_idx].create(img_size, CV_8U);
-		mask[img_idx].setTo(Scalar::all(255));
-		warper[img_idx]->warp(mask[img_idx], K, cameras[img_idx].R, INTER_NEAREST,
-				BORDER_CONSTANT, mask_warped[img_idx]);
+		mask.create(img_size, CV_8U);
+		mask.setTo(Scalar::all(255));
+		warper->warp(mask, K, cameras[img_idx].R, INTER_NEAREST,
+				BORDER_CONSTANT, mask_warped);
 
 		// Compensate exposure
-		compensator->apply(img_idx, corners[img_idx], img_warped[img_idx], mask_warped[img_idx]);
+		compensator->apply(img_idx, corners[img_idx], img_warped, mask_warped);
 
-		img_warped[img_idx].convertTo(img_warped_s[img_idx], CV_16S);
-		//img_warped.release();
-		//img[img_idx].release();
-		//mask.release();
+		img_warped.convertTo(img_warped_s, CV_16S);
+		img_warped.release();
+		img.release();
+		mask.release();
 
-		dilate(masks_warped[img_idx], dilated_mask[img_idx], Mat());
-		resize(dilated_mask[img_idx], seam_mask[img_idx], mask_warped[img_idx].size());
-		mask_warped[img_idx] = seam_mask[img_idx] & mask_warped[img_idx];
+		dilate(masks_warped[img_idx], dilated_mask, Mat());
+		resize(dilated_mask, seam_mask, mask_warped.size());
+		mask_warped = seam_mask & mask_warped;
+
+		if (blender.empty()) {
+			blender = Blender::createDefault(blend_type, useGPU);
+			Size dst_sz = resultRoi(corners, sizes).size();
+			float blend_width = sqrt(static_cast<float>(dst_sz.area()))
+					* blend_strength / 100.f;
+			if (blend_width < 1.f)
+				blender = Blender::createDefault(Blender::NO, useGPU);
+			else if (blend_type == Blender::MULTI_BAND) {
+				MultiBandBlender* mb =
+						dynamic_cast<MultiBandBlender*>(static_cast<Blender*>(blender));
+				mb->setNumBands(
+						static_cast<int>(ceil(log(blend_width) / log(2.)) - 1.));
+
+			} else if (blend_type == Blender::FEATHER) {
+				FeatherBlender* fb =
+						dynamic_cast<FeatherBlender*>(static_cast<Blender*>(blender));
+				fb->setSharpness(1.f / blend_width);
+
+			}
+			blender->prepare(corners, sizes);
+		}
 
 		// Blend the current image
-		blender->feed(img_warped_s[img_idx], mask_warped[img_idx], corners[img_idx]);
+		blender->feed(img_warped_s, mask_warped, corners[img_idx]);
 	}
-
-
-	full_img.clear();
-	img.clear();
 	Mat result_mask;
 	blender->blend(result, result_mask);
 }
 
-bool fileExists(const string& filename) {
-	struct stat buf;
-	if (stat(filename.c_str(), &buf) != -1)
-		return true;
-	return false;
-}
-
-Mat inputMatchMask(const int& size, string& pairwise_path) {
-	Mat matchMask(size, size, CV_8U, Scalar(0));
-	pairwise_path = pairwise_path + "/pairwise.txt";
-	if (fileExists(pairwise_path.c_str())) {
-		ifstream pairwise(pairwise_path.c_str(), ifstream::in);
-		while (true) {
-			int i, j;
-			pairwise >> i >> j;
-			if (pairwise.eof())
-				break;
-			matchMask.at<char>(i, j) = 1;
-		}
-	} else {
-		for (int i = 0; i < num_images - 1; i++)
-			matchMask.at<char>(i, i + 1) = 1;
-	}
-	return matchMask;
-}
-
-void modifiedStitcher(string dst) {
+void defaultStitcher(string dst) {
 	Stitcher stitcher = Stitcher::createDefault(false);
 	vector<Mat> vImg;
 	Mat rImg;
 	long long start = getTickCount();
-	vector<Rect> roi1, roi2;
-	vector<vector<Rect> > rois;
-	for (int i = 0; i < num_images; i++) {
-		Mat tmp = imread(imgNames[i]);
-		vImg.push_back(tmp);
-		if (i == 0) {
-			Rect newSize(0, 0, tmp.cols * 2 / 5, tmp.rows);
-			roi1.push_back(newSize);
-			rois.push_back(roi1);
-			roi1.clear();
-		} else if (i == num_images - 1) {
-			Rect newSize(tmp.cols * 3 / 5, 0, tmp.cols * 2 / 5, tmp.rows);
-			roi2.push_back(newSize);
-			rois.push_back(roi2);
-			roi2.clear();
-		} else {
-			Rect newSize(0, 0, tmp.cols * 2 / 5, tmp.rows);
-			roi1.push_back(newSize);
-			newSize = cvRect(tmp.cols * 3 / 5, 0, tmp.cols * 2 / 5, tmp.rows);
-			roi1.push_back(newSize);
-			rois.push_back(roi1);
-			roi1.clear();
-		}
-	}
-	stitcher.setRegistrationResol(0.4);
-	stitcher.setPanoConfidenceThresh(1.0);
-	Mat matchMask(num_images, num_images, CV_8U, Scalar(0));
-	matchMask = inputMatchMask(num_images, dst);
-	//stitcher.setMatchingMask(matchMask);
-	stitcher.setWarper(new cv::SphericalWarper());
-	stitcher.setExposureCompensator(
-			detail::ExposureCompensator::createDefault(
-					detail::ExposureCompensator::GAIN_BLOCKS));
-	stitcher.setSeamFinder(
-			new detail::GraphCutSeamFinder(
-					detail::GraphCutSeamFinderBase::COST_COLOR));
-	stitcher.estimateTransform(vImg, rois);
-	stitcher.composePanorama(rImg);
-	//stitcher.stitch(vImg, rois, rImg);
+	for (int i = 0; i < num_images; i++)
+		vImg.push_back(imread(imgNames[i]));
+
+	stitcher.stitch(vImg, rImg);
 	long long end = getTickCount();
-	ofs << left << setw(15)
+	ofs << setw(15)
 			<< ((rImg.rows == 1 && rImg.cols == 1) ? "Failed! " : "Succeed!")
 			<< setw(15) << (float(end) - float(start)) / getTickFrequency();
 	string x = dst.c_str();
-	x = x + "/resultStitcherMod.jpg";
+	x = x + "/1" + result_dest;
 	imwrite(x, rImg);
-
-}
-
-void inputFilesName() {
-	// Check if have enough images
-	/*if (num_images < 2)
-	 continue;
-	 */
-	for (int i = 0; i < num_images; i++) {
-		string tmp;
-		ifs >> tmp;
-		imgNames.push_back(tmp);
-	}
 }
 
 int main(int argc, char* argv[]) {
-	ifs.open(inFileName.c_str(), ifstream::in);
+
 	setBreakOnError(true);
 	int num_tests;
 	ifs >> num_tests;
 	long long start, end;
-	ofs.open(outFileName.c_str(), fstream::out);
-	ofs << left << setw(15) << "Test case" << setw(15) << "Files" << setw(15)
-			<< "Size" << setw(30) << "Rewrite Modified Stitcher" << '\n';
+	ofs.open("runtime.txt", fstream::out);
+	ofs << setw(15) << "Test case" << setw(15) << "Files" << setw(15)
+			<< "Size" << setw(30) << "Default Stitcher" << setw(30)
+			<< "Rewrite Stitcher" << '\n';
 	ofs.close();
 	while (num_tests--) {
-		ofs.open(outFileName.c_str(), fstream::app);
+		ofs.open("runtime.txt", fstream::app);
 		string dst;
 		ifs >> num_images >> dst;
-		ofs << left << setw(15) << dst << setw(15) << num_images;
+		ofs << setw(15) << dst << setw(15) << num_images;
 
 		// Check if have enough images
 		/*if (num_images < 2)
 		 continue;
 		 */
-		inputFilesName();
+		for (int i = 0; i < num_images; i++) {
+			string tmp;
+			ifs >> tmp;
+			imgNames.push_back(tmp);
+		}
 		Mat imgTmp = imread(imgNames[0]);
-		ofs << left << setw(7) << imgTmp.cols << "x" << setw(7) << imgTmp.rows;
-		/*		if (num_images > 20) {
-		 ofs << left << setw(15) << "Time out!\n";
-		 ofs.close();
-		 imgNames.clear();
-		 continue;
-		 }*/
-		//modifiedStitcher(dst);
+		ofs << setw(7) << imgTmp.cols << "x" << setw(7) << imgTmp.rows;
+		if (num_images > 20) {
+			ofs << "Take too much time!\n";
+			ofs.close();
+			imgNames.clear();
+			continue;
+		}
+		defaultStitcher(dst);
+		dst = dst + "/" + result_dest;
 		/*		int retval = parseInputArg(num_images, inputName);
 		 if (retval)
 		 return retval;*/
 
 		start = getTickCount();
-		full_img.resize(num_images);
-		img.resize(num_images);
 		vector<ImageFeatures> features(num_images);
 		vector<Mat> images(num_images);
 		vector<Size> full_img_sizes(num_images);
 		findFeatures(full_img_sizes, features, images);
+
 		float warped_image_scale;
 		vector<CameraParams> cameras;
 		vector<MatchesInfo> pairwise_matches;
-		string pairwise_path = dst;
-		Mat matchMask = inputMatchMask(features.size(), pairwise_path);
 		int check = pairwiseMatching(features, images, full_img_sizes, cameras,
-				warped_image_scale, pairwise_matches, matchMask);
-		if (check == -1) {
-			ofs << left << "Time out!\n";
+				warped_image_scale, pairwise_matches);
+		if (check == -1){
+			ofs << "Time out!\n";
 			imgNames.clear();
 			ofs.close();
 			continue;
 		}
 		estimate_refineCamera(pairwise_matches, features, cameras,
 				warped_image_scale);
+
 		Ptr<WarperCreator> warper_creator;
-		vector<Ptr<RotationWarper> > warper(num_images);
+		Ptr<RotationWarper> warper;
 		createWarper(warped_image_scale, warper_creator, warper);
+
 		vector<Point> corners(num_images);
 		vector<Mat> masks_warped(num_images);
 		Ptr<ExposureCompensator> compensator;
 		vector<Size> sizes(num_images);
 		warpImages(images, cameras, corners, sizes, warper, masks_warped,
 				compensator);
+
 		Mat result;
 		composePano(warped_image_scale, warper, warper_creator, cameras,
 				full_img_sizes, corners, sizes, compensator, masks_warped,
 				result);
 		end = getTickCount();
-		dst = dst + "/" + result_dest;
 		imwrite(dst, result);
-		ofs << left << setw(15)
-				<< ((result.rows == 1 && result.cols == 1) ? "Failed! " : "")
-				<< setw(15) << (float(end) - float(start)) / getTickFrequency()
-				<< '\n';
+		ofs << setw(15)
+				<< ((result.rows == 1 && result.cols == 1) ?
+						"Failed! " : ((check == 0)?"Not enough!":"Succeed!")) << setw(15)
+				<< (float(end) - float(start)) / getTickFrequency() << '\n';
 		imgNames.clear();
 		ofs.close();
 	}
