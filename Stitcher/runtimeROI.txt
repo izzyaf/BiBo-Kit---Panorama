@@ -1,2 +1,0 @@
-Test case      Running Time   Size           
-tests/27       36             93.4554        
