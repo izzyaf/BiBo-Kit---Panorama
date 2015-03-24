@@ -15,21 +15,16 @@ bool sortY(cv::Point a, cv::Point b) {
 	return (a.y < b.y);
 }
 
-int Stitcher::registration(const std::vector<cv::Mat>& vImg,
-		const cv::Mat& matchMask,
-		std::vector<cv::detail::CameraParams>& cameras) {
+int Stitcher::registration(std::vector<cv::detail::CameraParams>& cameras) {
 
-	//std::vector<cv::detail::CameraParams> cameras;
 	int retVal = 1; //1 is normal, 0 is not enough, -1 is failed
 
-	num_images = vImg.size();
-	full_img.resize(num_images);
+	num_images = full_img.size();
 	img.resize(num_images);
 	images.resize(num_images);
 	full_img_sizes.resize(num_images);
 
 	std::vector<cv::detail::ImageFeatures> features(num_images);
-
 	{
 		double seam_scale = 1;
 		cv::Ptr<cv::detail::FeaturesFinder> finder;
@@ -42,40 +37,39 @@ int Stitcher::registration(const std::vector<cv::Mat>& vImg,
 
 		if (registration_resol > 0)
 			work_scale = std::min(1.0,
-					sqrt(registration_resol * 1e6 / vImg[0].size().area()));
+					sqrt(registration_resol * 1e6 / full_img[0].size().area()));
 		else
 			work_scale = 1;
+		std::vector<cv::Rect> ROI;
 
 		seam_scale = std::min(1.0,
-				sqrt(seam_estimation_resol * 1e6 / vImg[0].size().area()));
+				sqrt(seam_estimation_resol * 1e6 / full_img[0].size().area()));
 		seam_work_aspect = seam_scale / work_scale;
 
 #pragma omp parallel for
 		for (int i = 0; i < num_images; ++i) {
-			full_img[i] = vImg[i];
 			full_img_sizes[i] = full_img[i].size();
 			if (registration_resol <= 0)
 				img[i] = full_img[i];
 			else
 				cv::resize(full_img[i], img[i], cv::Size(), work_scale,
 						work_scale);
+
 			(*finder)(img[i], features[i]);
 			features[i].img_idx = i;
 			cv::resize(full_img[i], img[i], cv::Size(), seam_scale, seam_scale);
 			images[i] = img[i].clone();
 		}
-		std::cout << full_img[0].rows << "x" << full_img[0].cols << " " << img[0].rows << "x" << img[0].cols << " " << work_scale
-				<< "\n";
 		finder->collectGarbage();
 	}
+
 	std::vector<cv::detail::MatchesInfo> pairwise_matches;
 	{
 		cv::detail::BestOf2NearestMatcher matcher;
-		if (matchMask.at<unsigned char>(0, 1) == 0
-				&& matchMask.at<unsigned char>(1, 0) == 0)
+		if (matching_mask.rows * matching_mask.cols <= 1)
 			matcher(features, pairwise_matches);
 		else
-			matcher(features, pairwise_matches, matchMask);
+			matcher(features, pairwise_matches, matching_mask);
 		matcher.collectGarbage();
 
 		// Leave only images we are sure are from the same panorama
@@ -108,6 +102,7 @@ int Stitcher::registration(const std::vector<cv::Mat>& vImg,
 		if (num_images < 2)
 			return -1;
 	}
+
 	{
 		cv::detail::HomographyBasedEstimator estimator;
 		estimator(features, pairwise_matches, cameras);
@@ -216,6 +211,7 @@ cv::Mat Stitcher::compositing(std::vector<cv::detail::CameraParams>& cameras) {
 			warper[i] = warper_creator->create(
 					static_cast<float>(warped_image_scale * seam_work_aspect));
 	}
+
 	std::vector<cv::Point> corners(num_images);
 	std::vector<cv::Mat> masks_warped(num_images);
 	cv::Ptr<cv::detail::ExposureCompensator> compensator;
@@ -285,6 +281,7 @@ cv::Mat Stitcher::compositing(std::vector<cv::detail::CameraParams>& cameras) {
 		images_warped_f.clear();
 		masks.clear();
 	}
+
 	cv::Mat result;
 	{
 		cv::Ptr<cv::detail::Blender> blender;
@@ -387,6 +384,7 @@ cv::Mat Stitcher::compositing(std::vector<cv::detail::CameraParams>& cameras) {
 		cv::Mat result_mask;
 		blender->blend(result, result_mask);
 	}
+
 	return result;
 }
 bool Stitcher::checkInteriorExterior(const cv::Mat& mask,
@@ -531,14 +529,15 @@ Stitcher::Stitcher() {
 	blend_strength = 5;
 	seam_work_aspect = 1;
 	work_scale = 1;
-	registration_resol = 0.6;
-	seam_estimation_resol = 0.1;
-	confidence_threshold = 1.0;
-	warp_type = SPHERICAL;
-	seam_find_type = GC_COLOR;
-	expos_comp_type = cv::detail::ExposureCompensator::GAIN_BLOCKS;
+	registration_resol = 0.3;
+	seam_estimation_resol = 0.08;
+	confidence_threshold = 0.6;
+	warp_type = CYLINDRICAL;
+	seam_find_type = DP_COLORGRAD;
+	expos_comp_type = cv::detail::ExposureCompensator::GAIN;
 	compositing_resol = -1.0;
 	status = "";
+	matching_mask = cv::Mat(1, 1, CV_8U, cv::Scalar(0));
 }
 
 Stitcher::Stitcher(const int& mode) {
@@ -582,23 +581,134 @@ Stitcher::Stitcher(const int& mode) {
 	}
 	}
 	status = "";
+	matching_mask = cv::Mat(1, 1, CV_8U, cv::Scalar(0));
 }
 
-enum Stitcher::ReturnCode Stitcher::stitch(const std::vector<cv::Mat>& vImg,
-		const cv::Mat& matchMask, cv::Mat& result) {
+void Stitcher::set_matching_mask(const std::string& file_name,
+		std::vector<std::pair<int, int> >& edge_list) {
+	struct stat buf;
+	if (stat(file_name.c_str(), &buf) != -1) {
+		std::ifstream pairwise(file_name.c_str(), std::ifstream::in);
+		while (true) {
+			int i, j;
+			pairwise >> i >> j;
+			std::pair<int, int> t;
+			t = {i,j};
+			edge_list.push_back(t);
+			if (pairwise.eof())
+				break;
+		}
+		pairwise.close();
+	}
+}
+
+int Stitcher::rotate_img(const std::string& img_path) {
+	try {
+		Exiv2::Image::AutoPtr image = Exiv2::ImageFactory::open(img_path);
+
+		assert(image.get() != 0);
+
+		image->readMetadata();
+		Exiv2::ExifData &exifData = image->exifData();
+		if (exifData.empty()) throw Exiv2::Error(1, "No exif data found!");
+		Exiv2::ExifData::const_iterator i = exifData.findKey(
+				*(new Exiv2::ExifKey("Exif.Image.Orientation")));
+		int angle = i->value().toLong();
+		switch (angle) {
+		case 6: {
+#pragma omp parallel for
+			for (int i = 0; i < num_images; i++) {
+				cv::Mat tmp;
+				cv::transpose(full_img[i], tmp);
+				cv::flip(tmp, tmp, 1);
+				full_img[i] = tmp.clone();
+			}
+
+		}
+			break;
+		case 3: {
+#pragma omp parallel for
+			for (int i = 0; i < num_images; i++)
+				cv::flip(full_img[i], full_img[i], -1);
+
+		}
+			break;
+		}
+	} catch (Exiv2::AnyError& e) {
+		std::cout << e.what() << '\n';
+		return -1;
+	}
+	return 0;
+}
+
+void Stitcher::feed(const std::string& dir) {
+	boost::filesystem::path dir_path(dir);
+	try {
+		if (boost::filesystem::exists(dir_path)
+				&& boost::filesystem::is_directory(dir_path)) {
+			std::vector<boost::filesystem::path> file_list;
+			std::copy(boost::filesystem::directory_iterator(dir_path),
+					boost::filesystem::directory_iterator(),
+					std::back_inserter(file_list));
+			std::sort(file_list.begin(), file_list.end());
+			std::vector<std::pair<int, int> > edge_list;
+			bool rotate_check = false;
+			std::string sample_path;
+			for (auto i : file_list) {
+				if (boost::filesystem::is_regular_file(i)) {
+					std::string file_name = i.string();
+					std::string ext = file_name.substr(
+							file_name.find_last_of(".") + 1);
+					if (ext == "JPG" || ext == "jpg" || ext == "PNG"
+							|| ext == "png") {
+						full_img.push_back(cv::imread(file_name));
+						if (!rotate_check) {
+							sample_path = file_name;
+							rotate_check = true;
+						}
+					}
+
+					else if (ext == "TXT" || ext == "txt")
+						set_matching_mask(file_name, edge_list);
+				}
+			}
+			num_images = full_img.size();
+			if (!edge_list.empty()) {
+				matching_mask = cv::Mat(num_images, num_images, CV_8U,
+						cv::Scalar(0));
+				for (auto i : edge_list)
+					matching_mask.at<char>(i.first, i.second) = 1;
+			}
+			rotate_img(sample_path);
+
+		}
+	} catch (const boost::filesystem::filesystem_error& ex) {
+		return;
+	}
+}
+
+void Stitcher::set_dst(const std::string &dst) {
+	result_dst = dst;
+}
+
+std::string Stitcher::get_dst() {
+	return result_dst;
+}
+
+enum Stitcher::ReturnCode Stitcher::stitching_process(cv::Mat& result) {
 	enum ReturnCode retVal = OK;
-	if (vImg.size() < 2)
+	if (full_img.size() < 2)
 		retVal = NEED_MORE;
 	else {
 		std::vector<cv::detail::CameraParams> cameras;
-		int check = registration(vImg, matchMask, cameras);
+		int check = registration(cameras);
 		if (check == -1)
 			retVal = FAILED;
 		else {
 			if (check == 0)
 				retVal = NOT_ENOUGH;
 			result = compositing(cameras);
-			result = crop(result);
+			//result = crop(result);
 			if (result.rows * result.cols == 1)
 				retVal = FAILED;
 		}
@@ -631,18 +741,40 @@ enum Stitcher::ReturnCode Stitcher::stitch(const std::vector<cv::Mat>& vImg,
 	return retVal;
 }
 
-std::string Stitcher::toString() {
-	return status;
+void Stitcher::stitch() {
+	cv::Mat result;
+	std::vector<cv::Mat> img_bak = full_img;
+	enum ReturnCode code = stitching_process(result);
+	std::string tmp = status;
+	status = "";
+	if (code != OK) {
+		cv::Mat retry;
+		full_img = img_bak;
+		Stitcher(DEFAULT);
+		stitching_process(retry);
+		if ((result.cols * result.rows) < (retry.cols * retry.rows)) {
+			result = retry.clone();
+		} else
+			status = tmp;
+	}
+	tmp = result_dst + ".jpg";
+	cv::imwrite(tmp, result);
+	double scale = double(1080) / result.rows;
+	cv::Mat preview;
+	cv::resize(result, preview, cv::Size(), scale, scale);
+	result_dst = result_dst + "p.jpg";
+	cv::imwrite(result_dst, preview);
 }
 
-void Stitcher::collectGarbage() {
-	full_img.clear();
-	img.clear();
-	images.clear();
-	full_img_sizes.clear();
+std::string Stitcher::to_string() {
+	return status;
 }
 
 Stitcher::~Stitcher() {
 	// TODO Auto-generated destructor stub
+	full_img.clear();
+	img.clear();
+	images.clear();
+	full_img_sizes.clear();
 }
 

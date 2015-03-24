@@ -8,12 +8,14 @@
 #ifndef SRC_STITCHER_H_
 #define SRC_STITCHER_H_
 
-#include <string>
-#include <sstream>
-#include <iomanip>
-#include <vector>
-#include <algorithm>
-#include <iostream>
+#include <bits/stdc++.h>
+#include <sys/stat.h>
+
+#include <exiv2/exiv2.hpp>
+#include <boost/filesystem/operations.hpp>
+#include <boost/filesystem/path.hpp>
+#include <boost/progress.hpp>
+
 #include <opencv2/core/core.hpp>
 #include <opencv2/opencv_modules.hpp>
 #include <opencv2/highgui/highgui.hpp>
@@ -25,7 +27,7 @@
 #include <opencv2/stitching/detail/motion_estimators.hpp>
 #include <opencv2/stitching/detail/seam_finders.hpp>
 #include <opencv2/stitching/detail/util.hpp>
-#include <opencv2/stitching/detail/warpers.hpp>
+//#include <opencv2/stitching/detail/warpers.hpp>
 #include <opencv2/stitching/warpers.hpp>
 
 bool sortX(cv::Point, cv::Point);
@@ -67,25 +69,34 @@ private:
 		NO, VORONOI, GC_COLOR, GC_COLORGRAD, DP_COLOR, DP_COLORGRAD
 	};
 	enum SeamFindType seam_find_type;
-	int registration(
-			const std::vector<cv::Mat>&, const cv::Mat&, std::vector<cv::detail::CameraParams>&);
-	cv::Mat compositing(std::vector<cv::detail::CameraParams>&);
-	cv::Mat crop(const cv::Mat&);
-	bool checkInteriorExterior(const cv::Mat&, const cv::Rect&, int&, int&,
-			int&, int&);
-	std::string status;
-public:
 	enum Mode {
 		DEFAULT, FAST, PREVIEW
 	};
-	enum ReturnCode{
+	Stitcher(const int& mode);
+	void set_matching_mask(const std::string& file_name,
+			std::vector<std::pair<int, int> >& edge_list);
+	int rotate_img(const std::string&);
+	int registration(std::vector<cv::detail::CameraParams>&);
+	cv::Mat compositing(std::vector<cv::detail::CameraParams>&);
+	enum ReturnCode {
 		OK, FAILED, NOT_ENOUGH, NEED_MORE
 	};
+	enum ReturnCode stitching_process(cv::Mat&);
+	cv::Mat crop(const cv::Mat&) __attribute__ ((deprecated));bool checkInteriorExterior(
+			const cv::Mat&, const cv::Rect&, int&, int&, int&, int&)
+					__attribute__ ((deprecated));
+
+	std::string status;
+	std::string result_dst;
+	cv::Mat matching_mask;
+
+public:
 	Stitcher();
-	Stitcher(const int& mode);
-	enum ReturnCode stitch(const std::vector<cv::Mat>&, const cv::Mat& , cv::Mat&);
-	std::string toString();
-	void collectGarbage();
+	void set_dst(const std::string&);
+	std::string get_dst();
+	void feed(const std::string&);
+	void stitch();
+	std::string to_string();
 	virtual ~Stitcher();
 };
 
