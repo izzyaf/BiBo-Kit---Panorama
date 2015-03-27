@@ -12,7 +12,6 @@ std::string workingDir;
 
 int main(int argc, char* argv[]) {
 	cv::setBreakOnError(true);
-
 	if (argc < 2)
 		return -1;
 	workingDir = argv[1];
@@ -24,7 +23,8 @@ int main(int argc, char* argv[]) {
 	long long start = cv::getTickCount();
 	stitcher.stitch();
 	long long end = cv::getTickCount();
-	std::cout << (double(end)-start)/cv::getTickFrequency();
+	printf("%s\n", stitcher.to_string().c_str());
+	printf("%lf\n", (double(end)-start)/cv::getTickFrequency());
 
 	return 0;
 }
