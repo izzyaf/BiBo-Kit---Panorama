@@ -6,7 +6,7 @@ Image stitching prototype.
 Project Startdate: 13.01.2015
 
 
-CHANGELOG:
+#CHANGELOG:
 
 30/03/2015: 
 - Tăng mức độ ổn định khi ghép với bộ ảnh ko lý tưởng.
