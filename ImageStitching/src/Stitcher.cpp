@@ -8,23 +8,42 @@
 #include "Stitcher.h"
 
 void Stitcher::find_features(std::vector<cv::detail::ImageFeatures>& features) {
-	printf("\nFeatures finding\n");
+#if ON_LOGGER
+	printf("Find features\n");
+#endif
 	double seam_scale = 1;
 	cv::Ptr<cv::detail::FeaturesFinder> finder;
-	if (registration_resol <= 0.3)
-		finder = new cv::detail::OrbFeaturesFinder(cv::Size(1, 1), 1500, 1.0f,
+	if (matching_mask.size().area() <= 1)
+		finder = new cv::detail::OrbFeaturesFinder(cv::Size(3, 1), 5000, 1.3f,
 				5);
-	else
-		finder = new cv::detail::OrbFeaturesFinder(cv::Size(2, 2), 5000, 1.0f,
-				5);
+	else {
+		int img_area = full_img[0].size().area();
+		if (img_area <= 3e6) {
+#if ON_LOGGER
+			printf("	Maximum features: 1500");
+#endif
+			finder = new cv::detail::OrbFeaturesFinder();
+		} else if (img_area <= 5e6) {
+#if ON_LOGGER
+			printf("	Maximum features: 3000");
+#endif
+			finder = new cv::detail::OrbFeaturesFinder(cv::Size(3, 1), 3000,
+					1.3f, 5);
+		} else {
+#if ON_LOGGER
+			printf("	Maximum features: 5000");
+#endif
+			finder = new cv::detail::OrbFeaturesFinder(cv::Size(3, 1), 5000,
+					1.3f, 5);
+		}
+
+	}
 
 	if (registration_resol > 0)
 		work_scale = std::min(1.0,
 				sqrt(registration_resol * 1e6 / full_img[0].size().area()));
 	else
 		work_scale = 1;
-
-	std::vector<cv::Rect> ROI;
 	seam_scale = std::min(1.0,
 			sqrt(seam_estimation_resol * 1e6 / full_img[0].size().area()));
 	seam_work_aspect = seam_scale / work_scale;
@@ -35,64 +54,88 @@ void Stitcher::find_features(std::vector<cv::detail::ImageFeatures>& features) {
 			img[i] = full_img[i];
 		else
 			cv::resize(full_img[i], img[i], cv::Size(), work_scale, work_scale);
-
 		(*finder)(img[i], features[i]);
+#if ON_LOGGER
+		printf("	i%d %dx%d: %d features\n", i, img[i].rows, img[i].cols,
+				int(features[i].keypoints.size()));
+#endif
 		features[i].img_idx = i;
 		cv::resize(full_img[i], img[i], cv::Size(), seam_scale, seam_scale);
 		images[i] = img[i].clone();
-		printf("	i%d find features\n", i);
+
 	}
 	finder->collectGarbage();
 }
 
-void Stitcher::match_pairwise(std::vector<cv::detail::ImageFeatures>& features,
+void Stitcher::extract_biggest_component(
+		std::vector<cv::detail::ImageFeatures>& features,
 		std::vector<cv::detail::MatchesInfo>& pairwise_matches) {
-	printf("\nPairwise matching\n");
-	cv::detail::BestOf2NearestMatcher matcher;
-	if (matching_mask.rows * matching_mask.cols <= 1) {
-		matcher(features, pairwise_matches);
-		printf("	Don't use matching mask\n");
-	}
-
-	else {
-		matcher(features, pairwise_matches, matching_mask);
-		printf("	Use matching mask\n");
-	}
-	matcher.collectGarbage();
 	// Leave only images we are sure are from the same panorama
 	std::vector<int> indices = leaveBiggestComponent(features, pairwise_matches,
 			confidence_threshold);
 	std::vector<cv::Mat> img_subset(indices.size());
 	std::vector<cv::Size> full_img_sizes_subset(indices.size());
 	std::vector<cv::Mat> full_img_subset(indices.size());
-	printf("	Biggest component: ");
+#if ON_LOGGER
+	printf("Biggest component: ");
+#endif
 #pragma omp parallel for
 	for (size_t i = 0; i < indices.size(); ++i) {
+#if ON_LOGGER
 		printf("%d ", indices[i]);
+#endif
 		img_subset[i] = images[indices[i]];
 		full_img_sizes_subset[i] = full_img_sizes[indices[i]];
 		full_img_subset[i] = full_img[indices[i]];
-
 	}
 	images = img_subset;
 	full_img_sizes = full_img_sizes_subset;
 	full_img = full_img_subset;
+#if ON_LOGGER
 	printf("\n");
+#endif
+}
+
+void Stitcher::match_pairwise(std::vector<cv::detail::ImageFeatures>& features,
+		std::vector<cv::detail::MatchesInfo>& pairwise_matches) {
+#if ON_LOGGER
+	printf("Match pairwise\n");
+#endif
+	cv::detail::BestOf2NearestMatcher matcher;
+	if (matching_mask.rows * matching_mask.cols <= 1) {
+		matcher(features, pairwise_matches);
+#if ON_LOGGER
+		printf("	Don't use matching mask\n");
+#endif
+	} else {
+		matcher(features, pairwise_matches, matching_mask);
+#if ON_LOGGER
+		printf("	Use matching mask\n");
+#endif
+	}
+#if ON_LOGGER
+	for (auto i : pairwise_matches)
+		printf("	%d %d: %d\n", i.src_img_idx, i.dst_img_idx, i.num_inliers);
+#endif
+	matcher.collectGarbage();
+
 }
 
 void Stitcher::estimate_camera(std::vector<cv::detail::ImageFeatures>& features,
 		std::vector<cv::detail::MatchesInfo>& pairwise_matches,
 		std::vector<cv::detail::CameraParams>& cameras) {
-	printf("\nCamera estimating\n");
+	printf("Estimate camera\n");
 	cv::detail::HomographyBasedEstimator estimator;
 	estimator(features, pairwise_matches, cameras);
 #pragma omp parallel for
 	for (size_t i = 0; i < cameras.size(); ++i) {
 		cv::Mat R;
-		printf("	Convert camera %ld rotation\n", i);
+
 		cameras[i].R.convertTo(R, CV_32F);
 		cameras[i].R = R;
-
+#if ON_LOGGER
+		printf("	Convert camera %ld rotation\n", i);
+#endif
 	}
 
 }
@@ -101,8 +144,10 @@ void Stitcher::refine_camera(
 		const std::vector<cv::detail::ImageFeatures>& features,
 		const std::vector<cv::detail::MatchesInfo>& pairwise_matches,
 		std::vector<cv::detail::CameraParams>& cameras) {
-	printf("\nCamera refining\n");
+#if ON_LOGGER
+	printf("Refine camera\n");
 	printf("	Run bundle adjustment\n");
+#endif
 	cv::Ptr<cv::detail::BundleAdjusterBase> adjuster;
 	adjuster = new cv::detail::BundleAdjusterRay();
 	adjuster->setConfThresh(confidence_threshold);
@@ -116,19 +161,29 @@ void Stitcher::refine_camera(
 
 	adjuster->setRefinementMask(refine_mask);
 	(*adjuster)(features, pairwise_matches, cameras);
-	printf("	Find median focal length\n");
+#if ON_LOGGER
+	printf("	Find median focal length: ");
+#endif
 	// Find median focal length
 	std::vector<double> focals(cameras.size());
 #pragma omp parallel for
-	for (unsigned int i = 0; i < cameras.size(); i++)
+	for (unsigned int i = 0; i < cameras.size(); i++) {
 		focals[i] = cameras[i].focal;
+	}
+
 	sort(focals.begin(), focals.end());
 	if (focals.size() % 2 == 1)
 		warped_image_scale = static_cast<float>(focals[focals.size() / 2]);
 	else
 		warped_image_scale = static_cast<float>(focals[focals.size() / 2 - 1]
 				+ focals[focals.size() / 2]) * 0.5f;
+#if ON_LOGGER
+	printf("%f\n", warped_image_scale);
+#endif
+	focals.clear();
+#if ON_LOGGER
 	printf("	Do wave correction\n");
+#endif
 	std::vector<cv::Mat> rmats(cameras.size());
 #pragma omp parallel for
 	for (unsigned int i = 0; i < cameras.size(); i++)
@@ -137,46 +192,15 @@ void Stitcher::refine_camera(
 #pragma omp parallel for
 	for (unsigned int i = 0; i < cameras.size(); i++)
 		cameras[i].R = rmats[i];
-
-}
-
-int Stitcher::registration(std::vector<cv::detail::CameraParams>& cameras) {
-	printf("\n=========================================================\n");
-	printf("Registration stage\n");
-	int retVal = 1; //1 is normal, 0 is not enough, -1 is failed
-	img.resize(num_images);
-	images.resize(num_images);
-	full_img_sizes.resize(num_images);
-
-	std::vector<cv::detail::ImageFeatures> features(num_images);
-	find_features(features);
-
-	std::vector<cv::detail::MatchesInfo> pairwise_matches;
-	match_pairwise(features, pairwise_matches);
-	// Check if we still have enough images
-	int tmp = static_cast<int>(images.size());
-	std::ostringstream os;
-	os << tmp << "/" << num_images;
-	std::string stmp = os.str();
-	os << std::left << std::setw(10 - stmp.length()) << "";
-	status = status + os.str();
-	if (tmp < 2)
-		return -1;
-	if (tmp < num_images) {
-		num_images = tmp;
-		retVal = 0;
-	}
-
-	estimate_camera(features, pairwise_matches, cameras);
-	refine_camera(features, pairwise_matches, cameras);
-
-	return retVal;
+	rmats.clear();
 }
 
 void Stitcher::create_warper(
 		std::vector<cv::Ptr<cv::detail::RotationWarper> >& warper,
 		cv::Ptr<cv::WarperCreator>& warper_creator) {
-	printf("\nCreate warper\n");
+#if ON_LOGGER
+	printf("Create warper\n");
+#endif
 	switch (warp_type) {
 	case PLANE:
 		warper_creator = new cv::PlaneWarper();
@@ -236,7 +260,9 @@ std::vector<cv::Mat> Stitcher::warp_img(std::vector<cv::Point>& corners,
 		std::vector<cv::Size>& sizes, std::vector<cv::Mat>& masks_warped,
 		std::vector<cv::detail::CameraParams>& cameras,
 		cv::Ptr<cv::detail::ExposureCompensator>& compensator) {
-	printf("\nWarp images\n");
+#if ON_LOGGER
+	printf("Warp images\n");
+#endif
 	std::vector<cv::Mat> images_warped(num_images);
 	std::vector<cv::Mat> masks(num_images);
 #pragma omp parallel for
@@ -263,9 +289,13 @@ std::vector<cv::Mat> Stitcher::warp_img(std::vector<cv::Point>& corners,
 		warper[i]->warp(masks[i], K, cameras[i].R, cv::INTER_NEAREST,
 				cv::BORDER_CONSTANT, masks_warped[i]);
 		images_warped[i].convertTo(images_warped_f[i], CV_32F);
+#if ON_LOGGER
 		printf("	Warp image and mask %d\n", i);
+#endif
 	}
-	printf("\nFeed exposure compensator\n");
+#if ON_LOGGER
+	printf("Feed exposure compensator\n");
+#endif
 	compensator = cv::detail::ExposureCompensator::createDefault(
 			expos_comp_type);
 	compensator->feed(corners, images_warped, masks_warped);
@@ -279,7 +309,9 @@ std::vector<cv::Mat> Stitcher::warp_img(std::vector<cv::Point>& corners,
 void Stitcher::find_seam(std::vector<cv::Mat>& images_warped_f,
 		const std::vector<cv::Point>& corners,
 		std::vector<cv::Mat>& masks_warped) {
-	printf("\nFind seam\n");
+#if ON_LOGGER
+	printf("Find seam\n");
+#endif
 	// Prepare images masks
 	cv::Ptr<cv::detail::SeamFinder> seam_finder;
 	switch (seam_find_type) {
@@ -309,7 +341,6 @@ void Stitcher::find_seam(std::vector<cv::Mat>& images_warped_f,
 	seam_finder->find(images_warped_f, corners, masks_warped);
 	// Release unused memory
 	images.clear();
-
 }
 
 double Stitcher::resize_mask(
@@ -317,7 +348,9 @@ double Stitcher::resize_mask(
 		cv::Ptr<cv::WarperCreator>& warper_creator,
 		std::vector<cv::Point>& corners, std::vector<cv::Size>& sizes,
 		std::vector<cv::detail::CameraParams>& cameras) {
-	printf("\nResize mask\n");
+#if ON_LOGGER
+	printf("Resize mask\n");
+#endif
 	double compose_scale = 1;
 	double compose_work_aspect = 1;
 	if (compositing_resol > 0)
@@ -358,7 +391,9 @@ double Stitcher::resize_mask(
 cv::Ptr<cv::detail::Blender> Stitcher::prepare_blender(
 		const std::vector<cv::Point>& corners,
 		const std::vector<cv::Size>& sizes) {
-	printf("\nPrepare blender\n");
+#if ON_LOGGER
+	printf("Prepare blender\n");
+#endif
 	// Update corners and sizes
 	cv::Ptr<cv::detail::Blender> blender;
 	blender = cv::detail::Blender::createDefault(blend_type, false);
@@ -373,12 +408,17 @@ cv::Ptr<cv::detail::Blender> Stitcher::prepare_blender(
 				dynamic_cast<cv::detail::MultiBandBlender*>(static_cast<cv::detail::Blender*>(blender));
 		mb->setNumBands(
 				static_cast<int>(ceil(log(blend_width) / log(2.)) - 1.));
+#if ON_LOGGER
+		printf("	Number of bands: %d\n", mb->numBands());
+#endif
 
 	} else if (blend_type == cv::detail::Blender::FEATHER) {
 		cv::detail::FeatherBlender* fb =
 				dynamic_cast<cv::detail::FeatherBlender*>(static_cast<cv::detail::Blender*>(blender));
 		fb->setSharpness(1.f / blend_width);
-
+#if ON_LOGGER
+		printf("	Sharpeness: %f\n", fb->sharpness());
+#endif
 	}
 
 	blender->prepare(corners, sizes);
@@ -392,8 +432,9 @@ void Stitcher::blend_img(double& compose_scale,
 		std::vector<cv::Point>& corners, std::vector<cv::Mat>& masks_warped,
 		cv::Ptr<cv::detail::Blender>& blender,
 		std::vector<cv::detail::CameraParams>& cameras, cv::Mat& result) {
-	printf("\nBlend images\n");
-
+#if ON_LOGGER
+	printf("Blend pano\n");
+#endif
 #pragma omp parallel for
 	for (int img_idx = 0; img_idx < num_images; ++img_idx) {
 		cv::Mat mask_warped, img_warped_s, dilated_mask, seam_mask, mask,
@@ -431,83 +472,202 @@ void Stitcher::blend_img(double& compose_scale,
 		mask_warped = seam_mask & mask_warped;
 		seam_mask.release();
 		// Blend the current image
+#if ON_LOGGER
+		printf("	Image %d feeded\n", img_idx);
+#endif
 		blender->feed(img_warped_s, mask_warped, corners[img_idx]);
 		mask_warped.release();
 		img_warped_s.release();
-		printf("	Image %d feeded\n", img_idx);
 	}
 	cv::Mat result_mask;
 	blender->blend(result, result_mask);
 
 }
 
+int Stitcher::registration(std::vector<cv::detail::CameraParams>& cameras) {
+#if ON_LOGGER
+	long long start;
+	printf("=========================================================\n");
+	printf("Registration stage\n");
+#endif
+	int retVal = 1; //1 is normal, 0 is not enough, -1 is failed
+	img.resize(num_images);
+	images.resize(num_images);
+	full_img_sizes.resize(num_images);
+
+	std::vector<cv::detail::ImageFeatures> features(num_images);
+#if ON_LOGGER
+	start = cv::getTickCount();
+#endif
+	find_features(features);
+#if ON_LOGGER
+	printf("%lf\n",
+			(double(cv::getTickCount()) - start) / cv::getTickFrequency());
+#endif
+
+	std::vector<cv::detail::MatchesInfo> pairwise_matches;
+#if ON_LOGGER
+	start = cv::getTickCount();
+#endif
+	match_pairwise(features, pairwise_matches);
+#if ON_LOGGER
+	printf("%lf\n",
+			(double(cv::getTickCount()) - start) / cv::getTickFrequency());
+#endif
+
+#if ON_LOGGER
+	start = cv::getTickCount();
+#endif
+	// Leave only images we are sure are from the same panorama
+	extract_biggest_component(features, pairwise_matches);
+#if ON_LOGGER
+	printf("%lf\n",
+			(double(cv::getTickCount()) - start) / cv::getTickFrequency());
+#endif
+
+	// Check if we still have enough images
+	int tmp = static_cast<int>(images.size());
+	std::ostringstream os;
+	os << tmp << "/" << num_images;
+	std::string stmp = os.str();
+	os << std::left << std::setw(10 - stmp.length()) << "";
+	status = status + os.str();
+	if (tmp < 2)
+		return -1;
+	if (tmp < num_images) {
+		num_images = tmp;
+		retVal = 0;
+	}
+#if ON_LOGGER
+	start = cv::getTickCount();
+#endif
+	estimate_camera(features, pairwise_matches, cameras);
+#if ON_LOGGER
+	printf("%lf\n",
+			(double(cv::getTickCount()) - start) / cv::getTickFrequency());
+#endif
+
+#if ON_LOGGER
+	start = cv::getTickCount();
+#endif
+	refine_camera(features, pairwise_matches, cameras);
+#if ON_LOGGER
+	printf("%lf\n",
+			(double(cv::getTickCount()) - start) / cv::getTickFrequency());
+#endif
+	features.clear();
+	pairwise_matches.clear();
+	return retVal;
+}
+
 cv::Mat Stitcher::compositing(std::vector<cv::detail::CameraParams>& cameras) {
-	printf("\n=========================================================\n");
+#if ON_LOGGER
+	long long start;
+	printf("=========================================================\n");
 	printf("Compositing\n");
+#endif
 	cv::Ptr<cv::WarperCreator> warper_creator;
 	std::vector<cv::Ptr<cv::detail::RotationWarper> > warper(num_images);
 
 	// Warp images and their masks
+#if ON_LOGGER
+	start = cv::getTickCount();
+#endif
 	create_warper(warper, warper_creator);
+#if ON_LOGGER
+	printf("%lf\n",
+			(double(cv::getTickCount()) - start) / cv::getTickFrequency());
+#endif
 
 	std::vector<cv::Point> corners(num_images);
 	std::vector<cv::Mat> masks_warped(num_images);
 	cv::Ptr<cv::detail::ExposureCompensator> compensator;
 	std::vector<cv::Size> sizes(num_images);
+
+#if ON_LOGGER
+	start = cv::getTickCount();
+#endif
 	std::vector<cv::Mat> images_warped_f = warp_img(corners, warper, sizes,
 			masks_warped, cameras, compensator);
+#if ON_LOGGER
+	printf("%lf\n",
+			(double(cv::getTickCount()) - start) / cv::getTickFrequency());
+#endif
+
 	// Prepare images masks
+#if ON_LOGGER
+	start = cv::getTickCount();
+#endif
 	find_seam(images_warped_f, corners, masks_warped);
+#if ON_LOGGER
+	printf("%lf\n",
+			(double(cv::getTickCount()) - start) / cv::getTickFrequency());
+#endif
 	images_warped_f.clear();
 
+#if ON_LOGGER
+	start = cv::getTickCount();
+#endif
 	double compose_scale = resize_mask(warper, warper_creator, corners, sizes,
 			cameras);
+#if ON_LOGGER
+	printf("%lf\n",
+			(double(cv::getTickCount()) - start) / cv::getTickFrequency());
+#endif
 
 	// Update corners and sizes
 
+#if ON_LOGGER
+	start = cv::getTickCount();
+#endif
 	cv::Ptr<cv::detail::Blender> blender = prepare_blender(corners, sizes);
+#if ON_LOGGER
+	printf("%lf\n",
+			(double(cv::getTickCount()) - start) / cv::getTickFrequency());
+#endif
 	cv::Mat result;
+
+#if ON_LOGGER
+	start = cv::getTickCount();
+#endif
 	blend_img(compose_scale, warper, compensator, corners, masks_warped,
 			blender, cameras, result);
+#if ON_LOGGER
+	printf("%lf\n",
+			(double(cv::getTickCount()) - start) / cv::getTickFrequency());
+#endif
+
 	warper.clear();
+	corners.clear();
+	masks_warped.clear();
+	sizes.clear();
 
 	return result;
 }
 
 Stitcher::Stitcher() {
 	// TODO Auto-generated constructor stub
+#if ON_LOGGER
 	printf("Create stitcher using no argument\n");
-	warped_image_scale = 1.0;
-	num_images = 0;
-	blend_type = cv::detail::Blender::MULTI_BAND;
-	blend_strength = 5;
-	seam_work_aspect = 1;
-	work_scale = 1;
-	registration_resol = 0.3;
-	seam_estimation_resol = 0.08;
-	confidence_threshold = 0.6;
-	warp_type = CYLINDRICAL;
-	seam_find_type = DP_COLORGRAD;
-	expos_comp_type = cv::detail::ExposureCompensator::GAIN;
-	compositing_resol = -1.0;
-	status = "";
-	matching_mask = cv::Mat(1, 1, CV_8U, cv::Scalar(0));
-
+#endif
+	init(DEFAULT);
 }
 
-Stitcher::Stitcher(const int& mode) {
+void Stitcher::init(const int& mode) {
 	warped_image_scale = 1.0;
-	num_images = 0;
+	num_images = full_img.size();
 	blend_type = cv::detail::Blender::MULTI_BAND;
 	blend_strength = 5;
 	seam_work_aspect = 1;
 	work_scale = 1;
 	switch (mode) {
 	case FAST: {
+#if ON_LOGGER
 		printf("Create stitcher using fast mode\n");
+#endif
 		registration_resol = 0.3;
 		seam_estimation_resol = 0.08;
-		confidence_threshold = 0.6;
+		confidence_threshold = 1.0;
 		warp_type = CYLINDRICAL;
 		seam_find_type = DP_COLORGRAD;
 		expos_comp_type = cv::detail::ExposureCompensator::GAIN;
@@ -516,7 +676,9 @@ Stitcher::Stitcher(const int& mode) {
 	}
 		break;
 	case PREVIEW: {
+#if ON_LOGGER
 		printf("Create stitcher using preview mode\n");
+#endif
 		registration_resol = 0.3;
 		seam_estimation_resol = 0.08;
 		confidence_threshold = 0.6;
@@ -528,9 +690,11 @@ Stitcher::Stitcher(const int& mode) {
 	}
 		break;
 	case DEFAULT: {
+#if ON_LOGGER
 		printf("Create stitcher using default mode\n");
+#endif
 		registration_resol = 0.6;
-		seam_estimation_resol = 0.1;
+		seam_estimation_resol = 0.08;
 		confidence_threshold = 1.0;
 		warp_type = SPHERICAL;
 		seam_find_type = GC_COLOR;
@@ -548,7 +712,9 @@ void Stitcher::set_matching_mask(const std::string& file_name,
 		std::vector<std::pair<int, int> >& edge_list) {
 	struct stat buf;
 	if (stat(file_name.c_str(), &buf) != -1) {
+#if ON_LOGGER
 		printf("	Input matching mask from file\n");
+#endif
 		std::ifstream pairwise(file_name.c_str(), std::ifstream::in);
 		while (true) {
 			int i, j;
@@ -564,7 +730,9 @@ void Stitcher::set_matching_mask(const std::string& file_name,
 }
 
 int Stitcher::rotate_img(const std::string& img_path) {
-	printf("Rotate images if necessary\n");
+#if ON_LOGGER
+	printf("	Rotate images if necessary: ");
+#endif
 	try {
 		Exiv2::Image::AutoPtr image = Exiv2::ImageFactory::open(img_path);
 		assert(image.get() != 0);
@@ -573,14 +741,18 @@ int Stitcher::rotate_img(const std::string& img_path) {
 		if (exifData.empty())
 			throw Exiv2::Error(1, "		No exif data found!\n");
 		Exiv2::ExifData::const_iterator i = exifData.findKey(
-				*(new Exiv2::ExifKey("Exif.Image.Orientation\n")));
+				Exiv2::ExifKey("Exif.Image.Orientation"));
 		if (i == exifData.end())
 			throw Exiv2::Error(2, "		Orientation not found!\n");
 		int angle = i->value().toLong();
 		switch (angle) {
 		case 6: {
+#if ON_LOGGER
+			printf("pi/4 radian CCW\n");
+#endif
 #pragma omp parallel for
 			for (int i = 0; i < num_images; i++) {
+
 				cv::Mat tmp;
 				cv::transpose(full_img[i], tmp);
 				cv::flip(tmp, tmp, 1);
@@ -590,22 +762,34 @@ int Stitcher::rotate_img(const std::string& img_path) {
 		}
 			break;
 		case 3: {
+#if ON_LOGGER
+			printf("pi/2 radian CCW\n");
+#endif
 #pragma omp parallel for
 			for (int i = 0; i < num_images; i++)
 				cv::flip(full_img[i], full_img[i], -1);
 
 		}
 			break;
+		case 1:
+#if ON_LOGGER
+			printf("no rotation is needed.\n");
+#endif
+			break;
 		}
 	} catch (Exiv2::AnyError& e) {
+#if ON_LOGGER
 		printf("%s\n", e.what());
+#endif
 		return -1;
 	}
 	return 0;
 }
 
 void Stitcher::feed(const std::string& dir) {
+#if ON_LOGGER
 	printf("Scan directory to find input images and matching masks\n");
+#endif
 	boost::filesystem::path dir_path(dir);
 	try {
 		if (boost::filesystem::exists(dir_path)
@@ -625,7 +809,14 @@ void Stitcher::feed(const std::string& dir) {
 							file_name.find_last_of(".") + 1);
 					if (ext == "JPG" || ext == "jpg" || ext == "PNG"
 							|| ext == "png") {
-						full_img.push_back(cv::imread(file_name));
+						cv::Mat img_tmp = cv::imread(file_name);
+
+						if (img_tmp.empty()) {
+#if ON_LOGGER
+							printf("	Error reading %s\n", file_name.c_str());
+#endif
+						} else
+							full_img.push_back(img_tmp);
 						if (!rotate_check) {
 							sample_path = file_name;
 							rotate_check = true;
@@ -649,7 +840,9 @@ void Stitcher::feed(const std::string& dir) {
 
 		}
 	} catch (const boost::filesystem::filesystem_error& ex) {
+#if ON_LOGGER
 		printf("Error when processing files.\n");
+#endif
 		return;
 	}
 }
@@ -707,21 +900,37 @@ enum Stitcher::ReturnCode Stitcher::stitching_process(cv::Mat& result) {
 	return retVal;
 }
 
+void Stitcher::collect_garbage() {
+	full_img.clear();
+	img.clear();
+	images.clear();
+	full_img_sizes.clear();
+}
+
 void Stitcher::stitch() {
 	cv::Mat result;
 	std::vector<cv::Mat> img_bak;
 	for (int i = 0; i < num_images; i++)
 		img_bak.push_back(full_img[i]);
-	enum ReturnCode code = stitching_process(result);
+#if ON_LOGGER
 	printf("1st try\n");
+#endif
+	enum ReturnCode code = stitching_process(result);
 	std::string tmp = status.substr(0);
+#if ON_LOGGER
+	printf("%s\n", status.c_str());
+#endif
 	status = "";
 	if (code != OK) {
 		cv::Mat retry;
+		collect_garbage();
 		full_img = img_bak;
-		Stitcher(DEFAULT);
-		stitching_process(retry);
+		num_images = full_img.size();
+		matching_mask = cv::Mat(1, 1, CV_8U, cv::Scalar(0));
+#if ON_LOGGER
 		printf("2nd try\n");
+#endif
+		stitching_process(retry);
 		if ((result.cols * result.rows) < (retry.cols * retry.rows))
 			result = retry.clone();
 		else
@@ -743,9 +952,5 @@ std::string Stitcher::to_string() {
 
 Stitcher::~Stitcher() {
 	// TODO Auto-generated destructor stub
-	full_img.clear();
-	img.clear();
-	images.clear();
-	full_img_sizes.clear();
 }
 

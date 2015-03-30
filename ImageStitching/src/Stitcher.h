@@ -30,6 +30,8 @@
 #include <opencv2/stitching/detail/warpers.hpp>
 #include <opencv2/stitching/warpers.hpp>
 
+#define ON_LOGGER true
+
 class Stitcher {
 
 private:
@@ -131,13 +133,18 @@ private:
 	//The whole process combing first and second stage
 	enum ReturnCode stitching_process(cv::Mat&);
 
+	void collect_garbage();
+	void extract_biggest_component(
+			std::vector<cv::detail::ImageFeatures>& features,
+			std::vector<cv::detail::MatchesInfo>& pairwise_matches);
+
 public:
 	//Three mode for constructor argument
 	enum Mode {
 		DEFAULT, FAST, PREVIEW
 	};
 	//Stitcher class's constructor with argument
-	Stitcher(const int& mode);
+	void init(const int& mode);
 	//Stitcher class's constructor with no argument
 	Stitcher();
 
