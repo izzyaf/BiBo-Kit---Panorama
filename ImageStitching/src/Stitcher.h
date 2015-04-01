@@ -43,8 +43,13 @@ private:
 	 */
 	double registration_resol, seam_estimation_resol, compositing_resol,
 			confidence_threshold;
+	/*
+	 * expos_comp_type: enum contains type of Exposure Compensator
+	 * blend_type: type of blender
+	 */
 	int expos_comp_type, blend_type;
 	float blend_strength;
+	//number of input images
 	int num_images;
 	double seam_work_aspect;
 	double work_scale;
@@ -53,6 +58,7 @@ private:
 	std::vector<cv::Mat> img;
 	std::vector<cv::Mat> images;
 	std::vector<cv::Size> full_img_sizes;
+	// status of stitching process: failed, success or not enough
 	std::string status;
 	std::string result_dst;
 	cv::Mat matching_mask;
@@ -81,49 +87,64 @@ private:
 	//Input matching mask from file
 	void set_matching_mask(const std::string&,
 			std::vector<std::pair<int, int> >&);
+
 	//Rotate images for better stitching
 	int rotate_img(const std::string&);
 
 	//Find image's features for matching
 	void find_features(std::vector<cv::detail::ImageFeatures>&);
+
 	//Match pairs of images based on features
 	void match_pairwise(std::vector<cv::detail::ImageFeatures>&,
-			std::vector<cv::detail::MatchesInfo>& pairwise_matches);
+			std::vector<cv::detail::MatchesInfo>&);
+
+	//Extract biggest component from pairwise matching
+	void extract_biggest_component(std::vector<cv::detail::ImageFeatures>&,
+				std::vector<cv::detail::MatchesInfo>&);
+
 	//Estimate camera
 	void estimate_camera(std::vector<cv::detail::ImageFeatures>&,
 			std::vector<cv::detail::MatchesInfo>&,
 			std::vector<cv::detail::CameraParams>&);
+
 	//Refine
 	void refine_camera(const std::vector<cv::detail::ImageFeatures>&,
 			const std::vector<cv::detail::MatchesInfo>&,
 			std::vector<cv::detail::CameraParams>&);
+
 	//First stage of stitching, do needed calculation for stitching
 	int registration(std::vector<cv::detail::CameraParams>&);
 
 	//Create warper that effect the "style" of output
 	void create_warper(std::vector<cv::Ptr<cv::detail::RotationWarper> >&,
 			cv::Ptr<cv::WarperCreator>&);
+
 	//Warp all remain images from pairwise matching
 	std::vector<cv::Mat> warp_img(std::vector<cv::Point>&,
 			std::vector<cv::Ptr<cv::detail::RotationWarper> >&,
 			std::vector<cv::Size>&, std::vector<cv::Mat>&,
 			std::vector<cv::detail::CameraParams>&,
 			cv::Ptr<cv::detail::ExposureCompensator>&);
+
 	//Find seam for stitching and blending
 	void find_seam(std::vector<cv::Mat>&, const std::vector<cv::Point>&,
 			std::vector<cv::Mat>&);
+
 	//Resize mask for blending
 	double resize_mask(std::vector<cv::Ptr<cv::detail::RotationWarper> >&,
 			cv::Ptr<cv::WarperCreator>&, std::vector<cv::Point>&,
 			std::vector<cv::Size>&, std::vector<cv::detail::CameraParams>&);
+
 	//Prepare blend
 	cv::Ptr<cv::detail::Blender> prepare_blender(const std::vector<cv::Point>&,
 			const std::vector<cv::Size>&);
+
 	//Stitch and blend output pano
 	void blend_img(double&, std::vector<cv::Ptr<cv::detail::RotationWarper> >&,
 			cv::Ptr<cv::detail::ExposureCompensator>&, std::vector<cv::Point>&,
 			std::vector<cv::Mat>&, cv::Ptr<cv::detail::Blender>&,
 			std::vector<cv::detail::CameraParams>&, cv::Mat&);
+
 	//Final stage of stitching, do all work basing on first stage output
 	cv::Mat compositing(std::vector<cv::detail::CameraParams>&);
 
@@ -134,9 +155,6 @@ private:
 	enum ReturnCode stitching_process(cv::Mat&);
 
 	void collect_garbage();
-	void extract_biggest_component(
-			std::vector<cv::detail::ImageFeatures>& features,
-			std::vector<cv::detail::MatchesInfo>& pairwise_matches);
 
 public:
 	//Three mode for constructor argument
@@ -144,7 +162,7 @@ public:
 		DEFAULT, FAST, PREVIEW
 	};
 	//Stitcher class's constructor with argument
-	void init(const int& mode);
+	void init(const int&);
 	//Stitcher class's constructor with no argument
 	Stitcher();
 

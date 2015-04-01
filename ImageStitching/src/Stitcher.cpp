@@ -11,42 +11,50 @@ void Stitcher::find_features(std::vector<cv::detail::ImageFeatures>& features) {
 #if ON_LOGGER
 	printf("Find features\n");
 #endif
-	double seam_scale = 1;
-	cv::Ptr<cv::detail::FeaturesFinder> finder;
-	if (matching_mask.size().area() <= 1)
-		finder = new cv::detail::OrbFeaturesFinder(cv::Size(3, 1), 5000, 1.3f,
-				5);
-	else {
-		int img_area = full_img[0].size().area();
-		if (img_area <= 3e6) {
-#if ON_LOGGER
-			printf("	Maximum features: 1500");
-#endif
-			finder = new cv::detail::OrbFeaturesFinder();
-		} else if (img_area <= 5e6) {
-#if ON_LOGGER
-			printf("	Maximum features: 3000");
-#endif
-			finder = new cv::detail::OrbFeaturesFinder(cv::Size(3, 1), 3000,
-					1.3f, 5);
-		} else {
-#if ON_LOGGER
-			printf("	Maximum features: 5000");
-#endif
-			finder = new cv::detail::OrbFeaturesFinder(cv::Size(3, 1), 5000,
-					1.3f, 5);
-		}
 
-	}
-
-	if (registration_resol > 0)
-		work_scale = std::min(1.0,
-				sqrt(registration_resol * 1e6 / full_img[0].size().area()));
-	else
-		work_scale = 1;
-	seam_scale = std::min(1.0,
+	work_scale = std::min(1.0,
+			sqrt(registration_resol * 1e6 / full_img[0].size().area()));
+	double seam_scale = std::min(1.0,
 			sqrt(seam_estimation_resol * 1e6 / full_img[0].size().area()));
 	seam_work_aspect = seam_scale / work_scale;
+	int num_features = int(
+			(work_scale * work_scale * full_img[0].size().area()) / 100);
+#if ON_LOGGER
+	printf("	Maximum features: %d\n", num_features);
+#endif
+	cv::Ptr<cv::detail::FeaturesFinder> finder =
+			new cv::detail::OrbFeaturesFinder(cv::Size(3, 1), num_features,
+					1.3f, 5);
+	/*	if (matching_mask.size().area() <= 1) {
+	 #if ON_LOGGER
+	 printf("	Maximum features: 5000\n");
+	 #endif
+	 finder = new cv::detail::OrbFeaturesFinder(cv::Size(3, 1), 5000, 1.3f,
+	 5);
+	 }
+
+	 else {
+	 int img_area = full_img[0].size().area();
+	 if (img_area <= 3e6) {
+	 #if ON_LOGGER
+	 printf("	Maximum features: 1500\n");
+	 #endif
+	 finder = new cv::detail::OrbFeaturesFinder();
+	 } else if (img_area <= 5e6) {
+	 #if ON_LOGGER
+	 printf("	Maximum features: 3000\n");
+	 #endif
+	 finder = new cv::detail::OrbFeaturesFinder(cv::Size(3, 1), 3000,
+	 1.3f, 5);
+	 } else {
+	 #if ON_LOGGER
+	 printf("	Maximum features: 5000\n");
+	 #endif
+	 finder = new cv::detail::OrbFeaturesFinder(cv::Size(3, 1), 5000,
+	 1.3f, 5);
+	 }
+	 }*/
+
 #pragma omp parallel for
 	for (int i = 0; i < num_images; ++i) {
 		full_img_sizes[i] = full_img[i].size();
@@ -115,7 +123,8 @@ void Stitcher::match_pairwise(std::vector<cv::detail::ImageFeatures>& features,
 	}
 #if ON_LOGGER
 	for (auto i : pairwise_matches)
-		printf("	%d %d: %d\n", i.src_img_idx, i.dst_img_idx, i.num_inliers);
+		if (i.src_img_idx < i.dst_img_idx)
+			printf("	%d %d: %d\n", i.src_img_idx, i.dst_img_idx, i.num_inliers);
 #endif
 	matcher.collectGarbage();
 
@@ -130,7 +139,6 @@ void Stitcher::estimate_camera(std::vector<cv::detail::ImageFeatures>& features,
 #pragma omp parallel for
 	for (size_t i = 0; i < cameras.size(); ++i) {
 		cv::Mat R;
-
 		cameras[i].R.convertTo(R, CV_32F);
 		cameras[i].R = R;
 #if ON_LOGGER
@@ -417,7 +425,7 @@ cv::Ptr<cv::detail::Blender> Stitcher::prepare_blender(
 				dynamic_cast<cv::detail::FeatherBlender*>(static_cast<cv::detail::Blender*>(blender));
 		fb->setSharpness(1.f / blend_width);
 #if ON_LOGGER
-		printf("	Sharpeness: %f\n", fb->sharpness());
+		printf("	Sharpness: %f\n", fb->sharpness());
 #endif
 	}
 
@@ -660,45 +668,39 @@ void Stitcher::init(const int& mode) {
 	blend_strength = 5;
 	seam_work_aspect = 1;
 	work_scale = 1;
+	warp_type = CYLINDRICAL;
+	seam_find_type = DP_COLORGRAD;
+	expos_comp_type = cv::detail::ExposureCompensator::GAIN;
 	switch (mode) {
 	case FAST: {
 #if ON_LOGGER
-		printf("Create stitcher using fast mode\n");
+		printf("Initialize stitcher using fast mode\n");
 #endif
 		registration_resol = 0.3;
-		seam_estimation_resol = 0.08;
+		seam_estimation_resol = 0.1;
 		confidence_threshold = 1.0;
-		warp_type = CYLINDRICAL;
-		seam_find_type = DP_COLORGRAD;
-		expos_comp_type = cv::detail::ExposureCompensator::GAIN;
 		compositing_resol = -1.0;
 
 	}
 		break;
 	case PREVIEW: {
 #if ON_LOGGER
-		printf("Create stitcher using preview mode\n");
+		printf("Initialize stitcher using preview mode\n");
 #endif
 		registration_resol = 0.3;
 		seam_estimation_resol = 0.08;
 		confidence_threshold = 0.6;
-		warp_type = CYLINDRICAL;
-		seam_find_type = DP_COLORGRAD;
-		expos_comp_type = cv::detail::ExposureCompensator::GAIN;
 		compositing_resol = 0.6;
 
 	}
 		break;
 	case DEFAULT: {
 #if ON_LOGGER
-		printf("Create stitcher using default mode\n");
+		printf("Initialize stitcher using default mode\n");
 #endif
 		registration_resol = 0.6;
 		seam_estimation_resol = 0.08;
 		confidence_threshold = 1.0;
-		warp_type = SPHERICAL;
-		seam_find_type = GC_COLOR;
-		expos_comp_type = cv::detail::ExposureCompensator::GAIN_BLOCKS;
 		compositing_resol = -1.0;
 
 	}
@@ -739,16 +741,16 @@ int Stitcher::rotate_img(const std::string& img_path) {
 		image->readMetadata();
 		Exiv2::ExifData &exifData = image->exifData();
 		if (exifData.empty())
-			throw Exiv2::Error(1, "		No exif data found!\n");
+			throw Exiv2::Error(1, "No exif data found!");
 		Exiv2::ExifData::const_iterator i = exifData.findKey(
 				Exiv2::ExifKey("Exif.Image.Orientation"));
 		if (i == exifData.end())
-			throw Exiv2::Error(2, "		Orientation not found!\n");
+			throw Exiv2::Error(2, "Orientation not found!");
 		int angle = i->value().toLong();
 		switch (angle) {
 		case 6: {
 #if ON_LOGGER
-			printf("pi/4 radian CCW\n");
+			printf("pi/4 radian CCW");
 #endif
 #pragma omp parallel for
 			for (int i = 0; i < num_images; i++) {
@@ -763,7 +765,7 @@ int Stitcher::rotate_img(const std::string& img_path) {
 			break;
 		case 3: {
 #if ON_LOGGER
-			printf("pi/2 radian CCW\n");
+			printf("pi/2 radian CCW");
 #endif
 #pragma omp parallel for
 			for (int i = 0; i < num_images; i++)
@@ -773,16 +775,17 @@ int Stitcher::rotate_img(const std::string& img_path) {
 			break;
 		case 1:
 #if ON_LOGGER
-			printf("no rotation is needed.\n");
+			printf("no rotation.");
 #endif
 			break;
 		}
 	} catch (Exiv2::AnyError& e) {
 #if ON_LOGGER
-		printf("%s\n", e.what());
+		printf(" %s\n", e.what());
 #endif
 		return -1;
 	}
+	printf("\n");
 	return 0;
 }
 
@@ -918,19 +921,22 @@ void Stitcher::stitch() {
 	enum ReturnCode code = stitching_process(result);
 	std::string tmp = status.substr(0);
 #if ON_LOGGER
-	printf("%s\n", status.c_str());
+	printf("%s\n\n", status.c_str());
 #endif
 	status = "";
 	if (code != OK) {
 		cv::Mat retry;
 		collect_garbage();
+		init(DEFAULT);
 		full_img = img_bak;
 		num_images = full_img.size();
-		matching_mask = cv::Mat(1, 1, CV_8U, cv::Scalar(0));
 #if ON_LOGGER
 		printf("2nd try\n");
 #endif
 		stitching_process(retry);
+#if ON_LOGGER
+		printf("%s\n\n", status.c_str());
+#endif
 		if ((result.cols * result.rows) < (retry.cols * retry.rows))
 			result = retry.clone();
 		else
@@ -941,9 +947,12 @@ void Stitcher::stitch() {
 	cv::imwrite(tmp, result);
 	double scale = double(1080) / result.rows;
 	cv::Mat preview;
-	cv::resize(result, preview, cv::Size(), scale, scale);
-	result_dst = result_dst + "p.jpg";
-	cv::imwrite(result_dst, preview);
+	if (scale < 1.25f)
+		cv::resize(result, preview, cv::Size(), scale, scale);
+	else
+		preview = result.clone();
+	tmp = result_dst + "p.jpg";
+	cv::imwrite(tmp, preview);
 }
 
 std::string Stitcher::to_string() {

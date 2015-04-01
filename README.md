@@ -8,6 +8,9 @@ Project Startdate: 13.01.2015
 
 #CHANGELOG:
 
+01/04/2015:
+- Cải thiện nhỏ hiệu suất.
+
 31/03/2015:
 - Không resize với ảnh có kích thước < 1.25*1080p.
 - Sửa lại log.
