@@ -11,6 +11,7 @@ void Stitcher::find_features(std::vector<cv::detail::ImageFeatures>& features) {
 #if ON_LOGGER
 	printf("Find features\n");
 #endif
+<<<<<<< HEAD
 
 	work_scale = std::min(1.0,
 			sqrt(registration_resol * 1e6 / full_img[0].size().area()));
@@ -21,10 +22,39 @@ void Stitcher::find_features(std::vector<cv::detail::ImageFeatures>& features) {
 			(work_scale * work_scale * full_img[0].size().area()) / 100);
 #if ON_LOGGER
 	printf("	Maximum features: %d\n", num_features);
+=======
+	double seam_scale = 1;
+	cv::Ptr<cv::detail::FeaturesFinder> finder;
+	if (matching_mask.size().area() <= 1) {
+#if ON_LOGGER
+		printf("	Maximum features: 5000\n");
+#endif
+		finder = new cv::detail::OrbFeaturesFinder(cv::Size(3, 1), 5000, 1.3f,
+				5);
+	}
+
+	else {
+		int img_area = full_img[0].size().area();
+		if (img_area <= 3e6) {
+#if ON_LOGGER
+			printf("	Maximum features: 1500\n");
+#endif
+			finder = new cv::detail::OrbFeaturesFinder();
+		} else if (img_area <= 5e6) {
+#if ON_LOGGER
+			printf("	Maximum features: 3000\n");
+#endif
+			finder = new cv::detail::OrbFeaturesFinder(cv::Size(3, 1), 3000,
+					1.3f, 5);
+		} else {
+#if ON_LOGGER
+			printf("	Maximum features: 5000\n");
+>>>>>>> origin/master
 #endif
 	cv::Ptr<cv::detail::FeaturesFinder> finder =
 			new cv::detail::OrbFeaturesFinder(cv::Size(3, 1), num_features,
 					1.3f, 5);
+<<<<<<< HEAD
 	/*	if (matching_mask.size().area() <= 1) {
 	 #if ON_LOGGER
 	 printf("	Maximum features: 5000\n");
@@ -55,6 +85,19 @@ void Stitcher::find_features(std::vector<cv::detail::ImageFeatures>& features) {
 	 }
 	 }*/
 
+=======
+		}
+	}
+
+	if (registration_resol > 0)
+		work_scale = std::min(1.0,
+				sqrt(registration_resol * 1e6 / full_img[0].size().area()));
+	else
+		work_scale = 1;
+	seam_scale = std::min(1.0,
+			sqrt(seam_estimation_resol * 1e6 / full_img[0].size().area()));
+	seam_work_aspect = seam_scale / work_scale;
+>>>>>>> origin/master
 #pragma omp parallel for
 	for (int i = 0; i < num_images; ++i) {
 		full_img_sizes[i] = full_img[i].size();
