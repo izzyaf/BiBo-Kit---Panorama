@@ -13,7 +13,9 @@ std::string workingDir;
 
 int main(int argc, char* argv[]) {
 #if ON_LOGGER
-	freopen("detail.txt", "a", stdout);
+	FILE *f_out = freopen("detail.txt", "a", stdout);
+	if (f_out == NULL)
+		freopen("/dev/tty", "a", stdout);
 #endif
 	cv::setBreakOnError(true);
 	if (argc < 2)

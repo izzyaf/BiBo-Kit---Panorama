@@ -7,9 +7,13 @@ Project Startdate: 13.01.2015
 
 #HOW TO USE:
 
-g++ -std=c++0x -O3 -Wall -c -fmessage-length=0 -fopenmp -MMD -MP -MF"Stitcher.d" -MT"Stitcher.d" -o "Stitcher.o" "Stitcher.cpp" && g++ -std=c++0x -O3 -Wall -c -fmessage-length=0 -fopenmp -MMD -MP -MF"main.d" -MT"main.d" -o "main.o" "main.cpp" && g++ -fopenmp -o "Stitch"  Stitcher.o main.o   -lexiv2 -lboost_system -lboost_filesystem -lopencv_core -lopencv_calib3d -lopencv_features2d -lopencv_imgproc -lopencv_highgui -lopencv_stitching
+Trong Terminal trỏ đến thư mục ImageStitching, gõ lệnh make
 
 #CHANGELOG:
+
+05/04/2014:
+- Thêm makefile
+- Tự ghi log ra màn hình nếu có lỗi khi ghi vào file log
 
 01/04/2015:
 - Cải thiện nhỏ hiệu suất.
