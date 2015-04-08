@@ -11,7 +11,6 @@ void Stitcher::find_features(std::vector<cv::detail::ImageFeatures>& features) {
 #if ON_LOGGER
 	printf("Find features\n");
 #endif
-
 	work_scale = std::min(1.0,
 			sqrt(registration_resol * 1e6 / full_img[0].size().area()));
 	double seam_scale = std::min(1.0,
@@ -25,35 +24,6 @@ void Stitcher::find_features(std::vector<cv::detail::ImageFeatures>& features) {
 	cv::Ptr<cv::detail::FeaturesFinder> finder =
 			new cv::detail::OrbFeaturesFinder(cv::Size(3, 1), num_features,
 					1.3f, 5);
-	/*	if (matching_mask.size().area() <= 1) {
-	 #if ON_LOGGER
-	 printf("	Maximum features: 5000\n");
-	 #endif
-	 finder = new cv::detail::OrbFeaturesFinder(cv::Size(3, 1), 5000, 1.3f,
-	 5);
-	 }
-
-	 else {
-	 int img_area = full_img[0].size().area();
-	 if (img_area <= 3e6) {
-	 #if ON_LOGGER
-	 printf("	Maximum features: 1500\n");
-	 #endif
-	 finder = new cv::detail::OrbFeaturesFinder();
-	 } else if (img_area <= 5e6) {
-	 #if ON_LOGGER
-	 printf("	Maximum features: 3000\n");
-	 #endif
-	 finder = new cv::detail::OrbFeaturesFinder(cv::Size(3, 1), 3000,
-	 1.3f, 5);
-	 } else {
-	 #if ON_LOGGER
-	 printf("	Maximum features: 5000\n");
-	 #endif
-	 finder = new cv::detail::OrbFeaturesFinder(cv::Size(3, 1), 5000,
-	 1.3f, 5);
-	 }
-	 }*/
 
 #pragma omp parallel for
 	for (int i = 0; i < num_images; ++i) {
@@ -406,8 +376,7 @@ cv::Ptr<cv::detail::Blender> Stitcher::prepare_blender(
 	cv::Ptr<cv::detail::Blender> blender;
 	blender = cv::detail::Blender::createDefault(blend_type, false);
 	cv::Size dst_sz = cv::detail::resultRoi(corners, sizes).size();
-	float blend_width = sqrt(static_cast<float>(dst_sz.area())) * blend_strength
-			/ 100.f;
+	float blend_width = sqrt(static_cast<float>(dst_sz.area())) * 5 / 100.f;
 	if (blend_width < 1.f)
 		blender = cv::detail::Blender::createDefault(cv::detail::Blender::NO,
 		false);
@@ -665,7 +634,6 @@ void Stitcher::init(const int& mode) {
 	warped_image_scale = 1.0;
 	num_images = full_img.size();
 	blend_type = cv::detail::Blender::MULTI_BAND;
-	blend_strength = 5;
 	seam_work_aspect = 1;
 	work_scale = 1;
 	warp_type = CYLINDRICAL;
@@ -794,6 +762,7 @@ void Stitcher::feed(const std::string& dir) {
 	printf("Scan directory to find input images and matching masks\n");
 #endif
 	boost::filesystem::path dir_path(dir);
+	std::string supported_format = "jpg jpeg jpe jp2 png bmp dib tif tiff pbm pgm ppm sr ras";
 	try {
 		if (boost::filesystem::exists(dir_path)
 				&& boost::filesystem::is_directory(dir_path)) {
@@ -810,8 +779,9 @@ void Stitcher::feed(const std::string& dir) {
 					std::string file_name = i.string();
 					std::string ext = file_name.substr(
 							file_name.find_last_of(".") + 1);
-					if (ext == "JPG" || ext == "jpg" || ext == "PNG"
-							|| ext == "png") {
+					std::transform(ext.begin(), ext.end(), ext.begin(),
+							::tolower);
+					if (supported_format.find(ext) != std::string::npos) {
 						cv::Mat img_tmp = cv::imread(file_name);
 
 						if (img_tmp.empty()) {
@@ -824,7 +794,7 @@ void Stitcher::feed(const std::string& dir) {
 							sample_path = file_name;
 							rotate_check = true;
 						}
-					} else if (ext == "TXT" || ext == "txt")
+					} else if (ext == "txt")
 						set_matching_mask(file_name, edge_list);
 				}
 			}

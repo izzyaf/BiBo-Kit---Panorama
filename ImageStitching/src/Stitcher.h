@@ -48,20 +48,17 @@ private:
 	 * blend_type: type of blender
 	 */
 	int expos_comp_type, blend_type;
-	float blend_strength;
-	//number of input images
-	int num_images;
-	double seam_work_aspect;
-	double work_scale;
-	float warped_image_scale;
-	std::vector<cv::Mat> full_img;
-	std::vector<cv::Mat> img;
-	std::vector<cv::Mat> images;
-	std::vector<cv::Size> full_img_sizes;
-	// status of stitching process: failed, success or not enough
-	std::string status;
-	std::string result_dst;
-	cv::Mat matching_mask;
+	int num_images; //number of input images
+	double seam_work_aspect; //for warping images
+	double work_scale; //for finding features and blending
+	float warped_image_scale; //blending
+	std::vector<cv::Mat> full_img; //original images
+	std::vector<cv::Mat> img; //temporary images used for finding features and blending
+	std::vector<cv::Mat> images; //temporary images used for warping
+	std::vector<cv::Size> full_img_sizes; //sizes of original images
+	std::string status; // status of stitching process: failed, success or not enough
+	std::string result_dst; ////determine the input and output directory
+	cv::Mat matching_mask; //contain pairs of image that can be stitched together
 	enum WarpType {
 		PLANE,
 		CYLINDRICAL,
@@ -84,6 +81,13 @@ private:
 		NO, VORONOI, GC_COLOR, GC_COLORGRAD, DP_COLOR, DP_COLORGRAD
 	};
 	enum SeamFindType seam_find_type;
+
+	//Three mode for init() argument
+	enum Mode {
+		DEFAULT, FAST, PREVIEW
+	};
+	//Stitcher class's initialization with argument
+	void init(const int&);
 	//Input matching mask from file
 	void set_matching_mask(const std::string&,
 			std::vector<std::pair<int, int> >&);
@@ -100,7 +104,7 @@ private:
 
 	//Extract biggest component from pairwise matching
 	void extract_biggest_component(std::vector<cv::detail::ImageFeatures>&,
-				std::vector<cv::detail::MatchesInfo>&);
+			std::vector<cv::detail::MatchesInfo>&);
 
 	//Estimate camera
 	void estimate_camera(std::vector<cv::detail::ImageFeatures>&,
@@ -157,12 +161,7 @@ private:
 	void collect_garbage();
 
 public:
-	//Three mode for constructor argument
-	enum Mode {
-		DEFAULT, FAST, PREVIEW
-	};
-	//Stitcher class's constructor with argument
-	void init(const int&);
+
 	//Stitcher class's constructor with no argument
 	Stitcher();
 
