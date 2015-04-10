@@ -762,7 +762,8 @@ void Stitcher::feed(const std::string& dir) {
 	printf("Scan directory to find input images and matching masks\n");
 #endif
 	boost::filesystem::path dir_path(dir);
-	std::string supported_format = "jpg jpeg jpe jp2 png bmp dib tif tiff pbm pgm ppm sr ras";
+	std::string supported_format =
+			"jpg jpeg jpe jp2 png bmp dib tif tiff pbm pgm ppm sr ras";
 	try {
 		if (boost::filesystem::exists(dir_path)
 				&& boost::filesystem::is_directory(dir_path)) {
@@ -903,16 +904,34 @@ void Stitcher::stitch() {
 #if ON_LOGGER
 		printf("2nd try\n");
 #endif
-		stitching_process(retry);
+		enum ReturnCode try_2nd = stitching_process(retry);
 #if ON_LOGGER
 		printf("%s\n\n", status.c_str());
 #endif
-		if ((result.cols * result.rows) < (retry.cols * retry.rows))
+		switch (try_2nd) {
+		case NEED_MORE:
+			return;
+		case OK: {
 			result = retry.clone();
-		else
 			status = tmp;
+		}
+			break;
+		case NOT_ENOUGH:
+			if (result.size().area() < retry.size().area())
+				result = retry.clone();
+			else
+				status = tmp;
+			break;
+		case FAILED:
+			break;
+		}
+
 	} else
 		status = tmp;
+#if ON_LOGGER
+	printf("Write final pano");
+	long long start = cv::getTickCount();
+#endif
 	tmp = result_dst + ".jpg";
 	cv::imwrite(tmp, result);
 	double scale = double(1080) / result.rows;
@@ -921,8 +940,15 @@ void Stitcher::stitch() {
 		cv::resize(result, preview, cv::Size(), scale, scale);
 	else
 		preview = result.clone();
+	std::vector<int> compression_para;
+	compression_para.push_back(CV_IMWRITE_JPEG_QUALITY);
+	compression_para.push_back(60);
 	tmp = result_dst + "p.jpg";
-	cv::imwrite(tmp, preview);
+	cv::imwrite(tmp, preview, compression_para);
+#if ON_LOGGER
+	printf("%lf\n",
+			(double(cv::getTickCount()) - start) / cv::getTickFrequency());
+#endif
 }
 
 std::string Stitcher::to_string() {
