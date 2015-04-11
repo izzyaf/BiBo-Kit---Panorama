@@ -50,13 +50,16 @@ private:
 	int expos_comp_type, blend_type;
 	int num_images; //number of input images
 	double seam_work_aspect; //for warping images
-	double work_scale; //for finding features and blending
+	double work_scale; //finding features and blending
 	float warped_image_scale; //blending
 	std::vector<cv::Mat> full_img; //original images
 	std::vector<cv::Mat> img; //temporary images used for finding features and blending
 	std::vector<cv::Mat> images; //temporary images used for warping
 	std::vector<cv::Size> full_img_sizes; //sizes of original images
-	std::string status; // status of stitching process: failed, success or not enough
+	enum ReturnCode {
+		OK, NOT_ENOUGH, FAILED, NEED_MORE
+	};
+	std::pair<ReturnCode, double> status; // status of stitching process: failed, success or not enough
 	std::string result_dst; ////determine the input and output directory
 	cv::Mat matching_mask; //contain pairs of image that can be stitched together
 	enum WarpType {
@@ -82,12 +85,8 @@ private:
 	};
 	enum SeamFindType seam_find_type;
 
-	//Three mode for init() argument
-	enum Mode {
-		DEFAULT, FAST, PREVIEW
-	};
 	//Stitcher class's initialization with argument
-	void init(const int&);
+	void init();
 	//Input matching mask from file
 	void set_matching_mask(const std::string&,
 			std::vector<std::pair<int, int> >&);
@@ -152,11 +151,8 @@ private:
 	//Final stage of stitching, do all work basing on first stage output
 	cv::Mat compositing(std::vector<cv::detail::CameraParams>&);
 
-	enum ReturnCode {
-		OK, FAILED, NOT_ENOUGH, NEED_MORE
-	};
 	//The whole process combing first and second stage
-	enum ReturnCode stitching_process(cv::Mat&);
+	void stitching_process(cv::Mat&);
 
 	void collect_garbage();
 
@@ -174,8 +170,8 @@ public:
 
 	//Stitch images into one panorama including retry
 	void stitch();
-	//Status of working
-	std::string to_string();
+
+	std::string get_status();
 
 	//Stitcher class's destructor
 	virtual ~Stitcher();

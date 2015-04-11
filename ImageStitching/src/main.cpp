@@ -18,6 +18,7 @@ int main(int argc, char* argv[]) {
 		freopen("/dev/tty", "a", stdout);
 #endif
 	cv::setBreakOnError(true);
+	cv::setUseOptimized(true);
 	if (argc < 2)
 		return -1;
 	long long start;
@@ -53,7 +54,7 @@ int main(int argc, char* argv[]) {
 #endif
 		stitcher.stitch();
 #if ON_LOGGER
-		printf("*****************************************\n%s\n", stitcher.to_string().c_str());
+		printf("%s\n", stitcher.get_status().c_str());
 		printf("%lf\n",
 				(double(cv::getTickCount()) - start) / cv::getTickFrequency());
 #endif

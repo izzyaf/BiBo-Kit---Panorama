@@ -11,10 +11,17 @@ Trong Terminal trỏ đến thư mục ImageStitching, gõ lệnh make
 
 #CHANGELOG:
 
+11/04/2014:
+- Thay cách lựa chọn kết quả trong trường hợp nối không đủ
+- Đổi cấu trúc trả về tình trạng xử lý
+- Giảm chất lượng và dung lượng ảnh preview
+- Loại bỏ chế độ nối ảnh FAST và PREVIEW
+- Cải thiện hiệu suất
+
 10/04/2014:
 - Sửa lỗi khi nối ảnh lần 2
 
-05/04/2014:
+08/04/2014:
 - Thêm makefile
 - Tự ghi log ra màn hình nếu có lỗi khi ghi vào file log
 

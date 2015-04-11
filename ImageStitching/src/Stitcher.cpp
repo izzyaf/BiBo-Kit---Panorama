@@ -504,11 +504,7 @@ int Stitcher::registration(std::vector<cv::detail::CameraParams>& cameras) {
 
 	// Check if we still have enough images
 	int tmp = static_cast<int>(images.size());
-	std::ostringstream os;
-	os << tmp << "/" << num_images;
-	std::string stmp = os.str();
-	os << std::left << std::setw(10 - stmp.length()) << "";
-	status = status + os.str();
+	status.second = double(tmp) / num_images;
 	if (tmp < 2)
 		return -1;
 	if (tmp < num_images) {
@@ -623,14 +619,13 @@ cv::Mat Stitcher::compositing(std::vector<cv::detail::CameraParams>& cameras) {
 }
 
 Stitcher::Stitcher() {
-	// TODO Auto-generated constructor stub
 #if ON_LOGGER
 	printf("Create stitcher using no argument\n");
 #endif
-	init(DEFAULT);
+	init();
 }
 
-void Stitcher::init(const int& mode) {
+void Stitcher::init() {
 	warped_image_scale = 1.0;
 	num_images = full_img.size();
 	blend_type = cv::detail::Blender::MULTI_BAND;
@@ -639,42 +634,10 @@ void Stitcher::init(const int& mode) {
 	warp_type = CYLINDRICAL;
 	seam_find_type = DP_COLORGRAD;
 	expos_comp_type = cv::detail::ExposureCompensator::GAIN;
-	switch (mode) {
-	case FAST: {
-#if ON_LOGGER
-		printf("Initialize stitcher using fast mode\n");
-#endif
-		registration_resol = 0.3;
-		seam_estimation_resol = 0.1;
-		confidence_threshold = 1.0;
-		compositing_resol = -1.0;
-
-	}
-		break;
-	case PREVIEW: {
-#if ON_LOGGER
-		printf("Initialize stitcher using preview mode\n");
-#endif
-		registration_resol = 0.3;
-		seam_estimation_resol = 0.08;
-		confidence_threshold = 0.6;
-		compositing_resol = 0.6;
-
-	}
-		break;
-	case DEFAULT: {
-#if ON_LOGGER
-		printf("Initialize stitcher using default mode\n");
-#endif
-		registration_resol = 0.6;
-		seam_estimation_resol = 0.08;
-		confidence_threshold = 1.0;
-		compositing_resol = -1.0;
-
-	}
-		break;
-	}
-	status = "";
+	registration_resol = 0.6;
+	seam_estimation_resol = 0.08;
+	confidence_threshold = 1.0;
+	compositing_resol = -1.0;
 	matching_mask = cv::Mat(1, 1, CV_8U, cv::Scalar(0));
 }
 
@@ -829,7 +792,7 @@ std::string Stitcher::get_dst() {
 	return result_dst;
 }
 
-enum Stitcher::ReturnCode Stitcher::stitching_process(cv::Mat& result) {
+void Stitcher::stitching_process(cv::Mat& result) {
 	enum ReturnCode retVal = OK;
 	if (full_img.size() < 2)
 		retVal = NEED_MORE;
@@ -847,31 +810,8 @@ enum Stitcher::ReturnCode Stitcher::stitching_process(cv::Mat& result) {
 		}
 		cameras.clear();
 	}
-	std::ostringstream os;
-	switch (retVal) {
-	case NOT_ENOUGH: {
-		os << std::left << std::setw(15) << "Not enough!";
-		status = status + os.str();
-	}
-		break;
-	case OK: {
-		os << std::left << std::setw(15) << "Succeed!";
-		status = status + os.str();
-	}
-		break;
-	case NEED_MORE: {
-		os << std::left << std::setw(15) << "Need more!";
-		status = status + os.str();
-	}
-		break;
-	case FAILED: {
-		os << std::left << std::setw(15) << "Failed!";
-		status = status + os.str();
-	}
-		break;
-	}
 
-	return retVal;
+	status.first = retVal;
 }
 
 void Stitcher::collect_garbage() {
@@ -883,56 +823,51 @@ void Stitcher::collect_garbage() {
 
 void Stitcher::stitch() {
 	cv::Mat result;
-	std::vector<cv::Mat> img_bak;
-	for (int i = 0; i < num_images; i++)
-		img_bak.push_back(full_img[i]);
+	std::vector<cv::Mat> img_bak = full_img;
 #if ON_LOGGER
 	printf("1st try\n");
 #endif
-	enum ReturnCode code = stitching_process(result);
-	std::string tmp = status.substr(0);
+	stitching_process(result);
+	std::pair<ReturnCode, double> tmp_code = status;
 #if ON_LOGGER
-	printf("%s\n\n", status.c_str());
+	printf("%d %lf\n\n", status.first, status.second);
 #endif
-	status = "";
-	if (code != OK) {
+	if (status.first == NEED_MORE)
+		return;
+	if (status.first != OK) {
 		cv::Mat retry;
 		collect_garbage();
-		init(DEFAULT);
+		init();
 		full_img = img_bak;
 		num_images = full_img.size();
 #if ON_LOGGER
 		printf("2nd try\n");
 #endif
-		enum ReturnCode try_2nd = stitching_process(retry);
+		stitching_process(retry);
 #if ON_LOGGER
-		printf("%s\n\n", status.c_str());
+		printf("%d %lf\n\n", status.first, status.second);
 #endif
-		switch (try_2nd) {
+		switch (status.first) {
 		case NEED_MORE:
 			return;
-		case OK: {
+		case OK:
 			result = retry.clone();
-			status = tmp;
-		}
 			break;
 		case NOT_ENOUGH:
-			if (result.size().area() < retry.size().area())
+			if (tmp_code.second < status.second)
 				result = retry.clone();
 			else
-				status = tmp;
+				status = tmp_code;
 			break;
 		case FAILED:
 			break;
 		}
-
-	} else
-		status = tmp;
+	}
 #if ON_LOGGER
-	printf("Write final pano");
+	printf("Write final pano ");
 	long long start = cv::getTickCount();
 #endif
-	tmp = result_dst + ".jpg";
+	std::string tmp = result_dst + ".jpg";
 	cv::imwrite(tmp, result);
 	double scale = double(1080) / result.rows;
 	cv::Mat preview;
@@ -942,7 +877,7 @@ void Stitcher::stitch() {
 		preview = result.clone();
 	std::vector<int> compression_para;
 	compression_para.push_back(CV_IMWRITE_JPEG_QUALITY);
-	compression_para.push_back(60);
+	compression_para.push_back(75);
 	tmp = result_dst + "p.jpg";
 	cv::imwrite(tmp, preview, compression_para);
 #if ON_LOGGER
@@ -951,11 +886,23 @@ void Stitcher::stitch() {
 #endif
 }
 
-std::string Stitcher::to_string() {
-	return status;
+std::string Stitcher::get_status() {
+	std::ostringstream ostr;
+	switch (status.first) {
+	case OK:
+		ostr << "OK " << status.second;
+		break;
+	case NOT_ENOUGH:
+		ostr << "Not enough " << status.second;
+		break;
+	case FAILED:
+		return "Failed";
+	case NEED_MORE:
+		return "Need more images";
+	}
+	return ostr.str();
 }
 
 Stitcher::~Stitcher() {
-	// TODO Auto-generated destructor stub
 }
 
