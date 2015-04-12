@@ -726,54 +726,53 @@ void Stitcher::feed(const std::string& dir) {
 #endif
 	boost::filesystem::path dir_path(dir);
 	std::string supported_format =
-			"jpg jpeg jpe jp2 png bmp dib tif tiff pbm pgm ppm sr ras";
+			".jpg .jpeg .jpe .jp2 .png .bmp .dib .tif .tiff .pbm .pgm .ppm .sr .ras";
 	try {
 		if (boost::filesystem::exists(dir_path)
 				&& boost::filesystem::is_directory(dir_path)) {
-			std::vector<boost::filesystem::path> file_list;
-			std::copy(boost::filesystem::directory_iterator(dir_path),
-					boost::filesystem::directory_iterator(),
-					std::back_inserter(file_list));
-			std::sort(file_list.begin(), file_list.end());
+			std::vector<std::string> img_name;
 			std::vector<std::pair<int, int> > edge_list;
-			bool rotate_check = false;
-			std::string sample_path;
-			for (auto i : file_list) {
-				if (boost::filesystem::is_regular_file(i)) {
-					std::string file_name = i.string();
-					std::string ext = file_name.substr(
-							file_name.find_last_of(".") + 1);
-					std::transform(ext.begin(), ext.end(), ext.begin(),
-							::tolower);
-					if (supported_format.find(ext) != std::string::npos) {
-						cv::Mat img_tmp = cv::imread(file_name);
+			boost::filesystem::directory_iterator it(dir);
+			while (it != boost::filesystem::directory_iterator()) {
+				boost::filesystem::path file_path = it->path();
 
-						if (img_tmp.empty()) {
-#if ON_LOGGER
-							printf("	Error reading %s\n", file_name.c_str());
-#endif
-						} else
-							full_img.push_back(img_tmp);
-						if (!rotate_check) {
-							sample_path = file_name;
-							rotate_check = true;
-						}
-					} else if (ext == "txt")
-						set_matching_mask(file_name, edge_list);
+				if ((boost::filesystem::is_regular_file(file_path))) {
+					std::string extension = file_path.extension().c_str();
+					std::transform(extension.begin(), extension.end(),
+							extension.begin(), ::tolower);
+					if (supported_format.find(extension) != std::string::npos) {
+						img_name.push_back(file_path.c_str());
+
+						num_images++;
+					} else if (file_path.filename().compare("pairwise.txt")
+							== 0)
+						set_matching_mask(file_path.c_str(), edge_list);
 				}
+				it++;
 			}
-			file_list.clear();
-			num_images = full_img.size();
+
+			std::sort(img_name.begin(), img_name.end());
+			full_img.resize(num_images);
+#pragma omp parallel for
+			for (int i = 0; i < num_images; i++)
+				full_img[i] = cv::imread(img_name[i]);
+			rotate_img(img_name[0]);
+			img_name.clear();
+
 			if (!edge_list.empty()) {
 				matching_mask = cv::Mat(num_images, num_images, CV_8U,
 						cv::Scalar(0));
-				for (auto i : edge_list)
-					if (i.first >= 0 && i.first < num_images && i.second >= 0
-							&& i.second < num_images)
-						matching_mask.at<char>(i.first, i.second) = 1;
+#pragma omp parallel for
+				for (unsigned int i = 0; i < edge_list.size(); i++) {
+					int t_first = edge_list[i].first, t_second =
+							edge_list[i].second;
+					if (t_first >= 0 && t_first < num_images && t_second >= 0
+							&& t_second < num_images)
+						matching_mask.at<char>(t_first, t_second) = 1;
+				}
+
 			}
 			edge_list.clear();
-			rotate_img(sample_path);
 
 		}
 	} catch (const boost::filesystem::filesystem_error& ex) {
@@ -845,7 +844,7 @@ void Stitcher::stitch() {
 #endif
 		stitching_process(retry);
 #if ON_LOGGER
-		printf("%d %lf\n\n", status.first, status.second);
+		printf("%d %lf\n", status.first, status.second);
 #endif
 		switch (status.first) {
 		case NEED_MORE:
@@ -867,19 +866,27 @@ void Stitcher::stitch() {
 	printf("Write final pano ");
 	long long start = cv::getTickCount();
 #endif
-	std::string tmp = result_dst + ".jpg";
-	cv::imwrite(tmp, result);
-	double scale = double(1080) / result.rows;
-	cv::Mat preview;
-	if (scale < 1.25f)
-		cv::resize(result, preview, cv::Size(), scale, scale);
-	else
-		preview = result.clone();
-	std::vector<int> compression_para;
-	compression_para.push_back(CV_IMWRITE_JPEG_QUALITY);
-	compression_para.push_back(75);
-	tmp = result_dst + "p.jpg";
-	cv::imwrite(tmp, preview, compression_para);
+#pragma omp parallel sections
+	{
+		{
+			std::string tmp_result = result_dst + ".jpg";
+			cv::imwrite(tmp_result, result);
+		}
+#pragma omp section
+		{
+			double scale = double(1080) / result.rows;
+			cv::Mat preview;
+			if (scale < 1.25f)
+				cv::resize(result, preview, cv::Size(), scale, scale);
+			else
+				preview = result.clone();
+			std::vector<int> compression_para;
+			compression_para.push_back(CV_IMWRITE_JPEG_QUALITY);
+			compression_para.push_back(75);
+			std::string tmp_preview = result_dst + "p.jpg";
+			cv::imwrite(tmp_preview, preview, compression_para);
+		}
+	}
 #if ON_LOGGER
 	printf("%lf\n",
 			(double(cv::getTickCount()) - start) / cv::getTickFrequency());
