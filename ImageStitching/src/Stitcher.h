@@ -32,6 +32,8 @@
 
 #define ON_LOGGER true
 
+int compareCvSize(const cv::Size&,const cv::Size&);
+
 class Stitcher {
 
 private:
@@ -55,7 +57,7 @@ private:
 	std::vector<cv::Mat> full_img; //original images
 	std::vector<cv::Mat> img; //temporary images used for finding features and blending
 	std::vector<cv::Mat> images; //temporary images used for warping
-	std::vector<cv::Size> full_img_sizes; //sizes of original images
+	cv::Size full_img_sizes; //sizes of original images
 	enum ReturnCode {
 		OK, NOT_ENOUGH, FAILED, NEED_MORE
 	};

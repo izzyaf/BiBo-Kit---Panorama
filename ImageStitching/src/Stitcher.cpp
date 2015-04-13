@@ -7,6 +7,10 @@
 
 #include "Stitcher.h"
 
+int compareCvSize(const cv::Size& size_1,const cv::Size& size_2){
+	return (size_1.area()<size_2.area());
+}
+
 void Stitcher::find_features(std::vector<cv::detail::ImageFeatures>& features) {
 #if ON_LOGGER
 	printf("Find features\n");
@@ -27,7 +31,7 @@ void Stitcher::find_features(std::vector<cv::detail::ImageFeatures>& features) {
 
 #pragma omp parallel for
 	for (int i = 0; i < num_images; ++i) {
-		full_img_sizes[i] = full_img[i].size();
+		//full_img_sizes[i] = full_img[i].size();
 		if (registration_resol <= 0)
 			img[i] = full_img[i];
 		else
@@ -63,11 +67,11 @@ void Stitcher::extract_biggest_component(
 		printf("%d ", indices[i]);
 #endif
 		img_subset[i] = images[indices[i]];
-		full_img_sizes_subset[i] = full_img_sizes[indices[i]];
+		//full_img_sizes_subset[i] = full_img_sizes[indices[i]];
 		full_img_subset[i] = full_img[indices[i]];
 	}
 	images = img_subset;
-	full_img_sizes = full_img_sizes_subset;
+	//full_img_sizes = full_img_sizes_subset;
 	full_img = full_img_subset;
 #if ON_LOGGER
 	printf("\n");
@@ -350,10 +354,10 @@ double Stitcher::resize_mask(
 		cameras[i].ppy *= compose_work_aspect;
 
 		// Update corner and size
-		cv::Size sz = full_img_sizes[i];
+		cv::Size sz = full_img_sizes;
 		if (std::abs(compose_scale - 1) > 1e-1) {
-			sz.width = cvRound(full_img_sizes[i].width * compose_scale);
-			sz.height = cvRound(full_img_sizes[i].height * compose_scale);
+			sz.width = cvRound(full_img_sizes.width * compose_scale);
+			sz.height = cvRound(full_img_sizes.height * compose_scale);
 		}
 
 		cv::Mat K;
@@ -373,8 +377,7 @@ cv::Ptr<cv::detail::Blender> Stitcher::prepare_blender(
 	printf("Prepare blender\n");
 #endif
 	// Update corners and sizes
-	cv::Ptr<cv::detail::Blender> blender;
-	blender = cv::detail::Blender::createDefault(blend_type, false);
+	cv::Ptr<cv::detail::Blender> blender = cv::detail::Blender::createDefault(blend_type, false);
 	cv::Size dst_sz = cv::detail::resultRoi(corners, sizes).size();
 	float blend_width = sqrt(static_cast<float>(dst_sz.area())) * 5 / 100.f;
 	if (blend_width < 1.f)
@@ -470,7 +473,7 @@ int Stitcher::registration(std::vector<cv::detail::CameraParams>& cameras) {
 	int retVal = 1; //1 is normal, 0 is not enough, -1 is failed
 	img.resize(num_images);
 	images.resize(num_images);
-	full_img_sizes.resize(num_images);
+	//full_img_sizes.resize(num_images);
 
 	std::vector<cv::detail::ImageFeatures> features(num_images);
 #if ON_LOGGER
@@ -742,7 +745,6 @@ void Stitcher::feed(const std::string& dir) {
 							extension.begin(), ::tolower);
 					if (supported_format.find(extension) != std::string::npos) {
 						img_name.push_back(file_path.c_str());
-
 						num_images++;
 					} else if (file_path.filename().compare("pairwise.txt")
 							== 0)
@@ -753,11 +755,21 @@ void Stitcher::feed(const std::string& dir) {
 
 			std::sort(img_name.begin(), img_name.end());
 			full_img.resize(num_images);
+			std::vector<cv::Size> full_img_tmp_size(num_images);
 #pragma omp parallel for
-			for (int i = 0; i < num_images; i++)
+			for (int i = 0; i < num_images; i++){
 				full_img[i] = cv::imread(img_name[i]);
+				full_img_tmp_size[i] = full_img[i].size();
+			}
+			std::sort(full_img_tmp_size.begin(), full_img_tmp_size.end(), compareCvSize);
+			full_img_sizes = full_img_tmp_size[0];
+			if (compareCvSize(full_img_tmp_size[0], full_img_tmp_size[num_images-1]))
+#pragma omp parallel for
+				for (int i=0; i<num_images; i++)
+					cv::resize(full_img[i], full_img[i], full_img_sizes);
 			rotate_img(img_name[0]);
 			img_name.clear();
+			full_img_tmp_size.clear();
 
 			if (!edge_list.empty()) {
 				matching_mask = cv::Mat(num_images, num_images, CV_8U,
@@ -817,7 +829,7 @@ void Stitcher::collect_garbage() {
 	full_img.clear();
 	img.clear();
 	images.clear();
-	full_img_sizes.clear();
+	//full_img_sizes.clear();
 }
 
 void Stitcher::stitch() {

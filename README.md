@@ -11,6 +11,10 @@ Trong Terminal trỏ đến thư mục ImageStitching, gõ lệnh make
 
 #CHANGELOG:
 
+13/04/2015:
+- Giảm bộ nhớ sử dụng
+- Xử lý bộ ảnh đầu vào không đồng đều
+
 12/04/2015:
 - Cải thiện hiệu suất
 
