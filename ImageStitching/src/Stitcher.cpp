@@ -154,11 +154,18 @@ void Stitcher::refine_camera(
 	}
 
 	sort(focals.begin(), focals.end());
-	if (focals.size() % 2 == 1)
-		warped_image_scale = static_cast<float>(focals[focals.size() / 2]);
-	else
-		warped_image_scale = static_cast<float>(focals[focals.size() / 2 - 1]
-				+ focals[focals.size() / 2]) * 0.5f;
+	int focal_end = focals.size();
+	while (focal_end > 0) {
+		int focal_mid = focals.size() / 2;
+		if (focals.size() % 2 == 1)
+			warped_image_scale = static_cast<float>(focals[focal_mid]);
+		else
+			warped_image_scale = static_cast<float>(focals[focal_mid - 1]
+					+ focals[focal_mid]) * 0.5f;
+		if (isnan(warped_image_scale)) focal_end = focal_mid;
+		else break;
+	}
+
 #if ON_LOGGER
 	printf("%f\n", warped_image_scale);
 #endif
@@ -633,8 +640,8 @@ void Stitcher::init() {
 	warped_image_scale = 1.0;
 	num_images = full_img.size();
 	blend_type = cv::detail::Blender::MULTI_BAND;
-	seam_work_aspect = 1;
-	work_scale = 1;
+	seam_work_aspect = 1.0;
+	work_scale = 1.0;
 	warp_type = CYLINDRICAL;
 	seam_find_type = DP_COLORGRAD;
 	expos_comp_type = cv::detail::ExposureCompensator::GAIN;
@@ -643,6 +650,7 @@ void Stitcher::init() {
 	confidence_threshold = 1.0;
 	compositing_resol = -1.0;
 	matching_mask = cv::Mat(1, 1, CV_8U, cv::Scalar(0));
+	status = {OK, -1};
 }
 
 void Stitcher::set_matching_mask(const std::string& file_name,
@@ -871,12 +879,14 @@ void Stitcher::stitch() {
 			result = retry.clone();
 			break;
 		case NOT_ENOUGH:
-			if (tmp_code.second < status.second)
+			if (tmp_code.first == status.first
+					&& tmp_code.second < status.second)
 				result = retry.clone();
 			else
 				status = tmp_code;
 			break;
 		case FAILED:
+			status = tmp_code;
 			break;
 		}
 	}
