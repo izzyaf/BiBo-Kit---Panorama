@@ -7,8 +7,8 @@
 
 #include "Stitcher.h"
 
-int compareCvSize(const cv::Size& size_1,const cv::Size& size_2){
-	return (size_1.area()<size_2.area());
+int compareCvSize(const cv::Size& size_1, const cv::Size& size_2) {
+	return (size_1.area() < size_2.area());
 }
 
 void Stitcher::find_features(std::vector<cv::detail::ImageFeatures>& features) {
@@ -377,7 +377,8 @@ cv::Ptr<cv::detail::Blender> Stitcher::prepare_blender(
 	printf("Prepare blender\n");
 #endif
 	// Update corners and sizes
-	cv::Ptr<cv::detail::Blender> blender = cv::detail::Blender::createDefault(blend_type, false);
+	cv::Ptr<cv::detail::Blender> blender = cv::detail::Blender::createDefault(
+			blend_type, false);
 	cv::Size dst_sz = cv::detail::resultRoi(corners, sizes).size();
 	float blend_width = sqrt(static_cast<float>(dst_sz.area())) * 5 / 100.f;
 	if (blend_width < 1.f)
@@ -757,19 +758,24 @@ void Stitcher::feed(const std::string& dir) {
 			full_img.resize(num_images);
 			std::vector<cv::Size> full_img_tmp_size(num_images);
 #pragma omp parallel for
-			for (int i = 0; i < num_images; i++){
+			for (int i = 0; i < num_images; i++) {
 				full_img[i] = cv::imread(img_name[i]);
 				full_img_tmp_size[i] = full_img[i].size();
 			}
-			std::sort(full_img_tmp_size.begin(), full_img_tmp_size.end(), compareCvSize);
+
+			std::sort(full_img_tmp_size.begin(), full_img_tmp_size.end(),
+					compareCvSize);
 			full_img_sizes = full_img_tmp_size[0];
-			if (compareCvSize(full_img_tmp_size[0], full_img_tmp_size[num_images-1]))
+			if (compareCvSize(full_img_tmp_size[0],
+					full_img_tmp_size[num_images - 1]))
 #pragma omp parallel for
-				for (int i=0; i<num_images; i++)
+				for (int i = 0; i < num_images; i++)
 					cv::resize(full_img[i], full_img[i], full_img_sizes);
-			rotate_img(img_name[0]);
-			img_name.clear();
 			full_img_tmp_size.clear();
+
+			rotate_img(img_name[0]);
+			full_img_sizes = full_img[0].size();
+			img_name.clear();
 
 			if (!edge_list.empty()) {
 				matching_mask = cv::Mat(num_images, num_images, CV_8U,
