@@ -691,17 +691,25 @@ int Stitcher::rotate_img(const std::string& img_path) {
 			throw Exiv2::Error(2, "Orientation not found!");
 		int angle = i->value().toLong();
 		switch (angle) {
+		case 8:{
+#if ON_LOGGER
+			printf("pi/4 radian CW");
+#endif
+#pragma omp parallel for
+			for (int i = 0; i < num_images; i++) {
+				cv::transpose(full_img[i], full_img[i]);
+				cv::flip(full_img[i], full_img[i], 0);
+			}
+		}
+		break;
 		case 6: {
 #if ON_LOGGER
 			printf("pi/4 radian CCW");
 #endif
 #pragma omp parallel for
 			for (int i = 0; i < num_images; i++) {
-
-				cv::Mat tmp;
-				cv::transpose(full_img[i], tmp);
-				cv::flip(tmp, tmp, 1);
-				full_img[i] = tmp.clone();
+				cv::transpose(full_img[i], full_img[i]);
+				cv::flip(full_img[i], full_img[i], 1);
 			}
 
 		}
