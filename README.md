@@ -9,6 +9,13 @@ Project Startdate: 13.01.2015
 
 Trong Terminal trỏ đến thư mục ImageStitching, gõ lệnh make
 
+#TEST CASE & RESULT:
+
+Test case: https://drive.google.com/file/d/0B4hX31GyxRr9ejI5WG1Ud1RlYm8/view?usp=sharing
+
+933: http://i57.tinypic.com/e63h2t.jpg
+1011: http://i58.tinypic.com/149mryx.jpg
+
 #CHANGELOG:
 
 13/04/2015:
