@@ -31,8 +31,9 @@
 #include <opencv2/stitching/warpers.hpp>
 
 #define ON_LOGGER true
+#define ON_DETAIL false
 
-int compareCvSize(const cv::Size&,const cv::Size&);
+int compareCvSize(const cv::Size&, const cv::Size&);
 
 class Stitcher {
 
@@ -91,7 +92,7 @@ private:
 	void init();
 	//Input matching mask from file
 	void set_matching_mask(const std::string&,
-			std::vector<std::pair<int, int> >&);
+			std::vector<std::pair<int, int> >&) __attribute__ ((deprecated));;
 
 	//Rotate images for better stitching
 	int rotate_img(const std::string&);
@@ -121,14 +122,12 @@ private:
 	int registration(std::vector<cv::detail::CameraParams>&);
 
 	//Create warper that effect the "style" of output
-	void create_warper(std::vector<cv::Ptr<cv::detail::RotationWarper> >&,
-			cv::Ptr<cv::WarperCreator>&);
+	void create_warper(cv::Ptr<cv::WarperCreator>&);
 
 	//Warp all remain images from pairwise matching
 	std::vector<cv::Mat> warp_img(std::vector<cv::Point>&,
-			std::vector<cv::Ptr<cv::detail::RotationWarper> >&,
-			std::vector<cv::Size>&, std::vector<cv::Mat>&,
-			std::vector<cv::detail::CameraParams>&,
+			const cv::Ptr<cv::WarperCreator>&, std::vector<cv::Size>&,
+			std::vector<cv::Mat>&, std::vector<cv::detail::CameraParams>&,
 			cv::Ptr<cv::detail::ExposureCompensator>&);
 
 	//Find seam for stitching and blending
@@ -136,16 +135,16 @@ private:
 			std::vector<cv::Mat>&);
 
 	//Resize mask for blending
-	double resize_mask(std::vector<cv::Ptr<cv::detail::RotationWarper> >&,
-			cv::Ptr<cv::WarperCreator>&, std::vector<cv::Point>&,
-			std::vector<cv::Size>&, std::vector<cv::detail::CameraParams>&);
+	double resize_mask(const cv::Ptr<cv::WarperCreator>&,
+			std::vector<cv::Point>&, std::vector<cv::Size>&,
+			std::vector<cv::detail::CameraParams>&);
 
 	//Prepare blend
 	cv::Ptr<cv::detail::Blender> prepare_blender(const std::vector<cv::Point>&,
 			const std::vector<cv::Size>&);
 
 	//Stitch and blend output pano
-	void blend_img(double&, std::vector<cv::Ptr<cv::detail::RotationWarper> >&,
+	void blend_img(const double&, const cv::Ptr<cv::WarperCreator>&,
 			cv::Ptr<cv::detail::ExposureCompensator>&, std::vector<cv::Point>&,
 			std::vector<cv::Mat>&, cv::Ptr<cv::detail::Blender>&,
 			std::vector<cv::detail::CameraParams>&, cv::Mat&);
