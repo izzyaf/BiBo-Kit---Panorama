@@ -815,41 +815,82 @@ int Stitcher::rotate_img(const std::string& img_path) {
 
 void Stitcher::feed(const std::string& dir) {
 	num_images = 0;
-	std::string src_img, dst_img;
-	std::ifstream ifs(dir + "pairwise.txt", std::ifstream::in);
+	struct stat buf;
+	std::string pairwise_path = dir + "pairwise.txt";
 	std::vector<std::string> img_name;
 	std::vector<std::pair<int, int>> pairwise;
-	int src_idx = 0, dst_idx = 0;
-	while (!ifs.eof()) {
-		ifs >> src_img >> dst_img;
-		unsigned int i = 0;
-		for (i = 0; i < img_name.size(); i++)
-			if (src_img == img_name[i]) {
-				src_idx = i;
-				break;
+	if (stat(pairwise_path.c_str(), &buf) != -1) {
+#if ON_LOGGER
+		printf("Input from pairwise.txt\n");
+#endif
+		std::string src_img, dst_img;
+		std::ifstream ifs(pairwise_path, std::ifstream::in);
+		int src_idx = 0, dst_idx = 0;
+		while (!ifs.eof()) {
+			ifs >> src_img >> dst_img;
+			unsigned int i = 0;
+			for (i = 0; i < img_name.size(); i++)
+				if (src_img == img_name[i]) {
+					src_idx = i;
+					break;
+				}
+			if (i == img_name.size()) {
+				src_idx = img_name.size();
+				img_name.push_back(dir + src_img);
 			}
-		if (i == img_name.size()) {
-			src_idx = img_name.size();
-			img_name.push_back(src_img);
-		}
-		i = 0;
-		for (i = 0; i < img_name.size(); i++)
-			if (dst_img == img_name[i]) {
-				dst_idx = i;
-				break;
+			i = 0;
+			for (i = 0; i < img_name.size(); i++)
+				if (dst_img == img_name[i]) {
+					dst_idx = i;
+					break;
+				}
+			if (i == img_name.size()) {
+				dst_idx = img_name.size();
+				img_name.push_back(dir + dst_img);
 			}
-		if (i == img_name.size()) {
-			dst_idx = img_name.size();
-			img_name.push_back(dst_img);
+			pairwise.push_back(std::make_pair(src_idx, dst_idx));
 		}
-		pairwise.push_back(std::make_pair(src_idx, dst_idx));
+		ifs.close();
+	} else {
+#if ON_LOGGER
+		printf("Scan directory to find input images\n");
+#endif
+		boost::filesystem::path dir_path(dir);
+		std::string supported_format =
+				".jpg .jpeg .jpe .jp2 .png .bmp .dib .tif .tiff .pbm .pgm .ppm .sr .ras";
+		try {
+			if (boost::filesystem::exists(dir_path)
+					&& boost::filesystem::is_directory(dir_path)) {
+				boost::filesystem::directory_iterator it(dir);
+				while (it != boost::filesystem::directory_iterator()) {
+					boost::filesystem::path file_path = it->path();
+					if ((boost::filesystem::is_regular_file(file_path))) {
+						std::string extension = file_path.extension().c_str();
+						std::transform(extension.begin(), extension.end(),
+								extension.begin(), ::tolower);
+						if (supported_format.find(extension)
+								!= std::string::npos) {
+							img_name.push_back(file_path.c_str());
+							num_images++;
+						}
+					}
+					it++;
+				}
+			}
+		} catch (const boost::filesystem::filesystem_error& ex) {
+#if ON_LOGGER
+			printf("Error when processing files.\n");
+#endif
+			return;
+		}
+
 	}
 	num_images = img_name.size();
 	full_img.resize(num_images);
 	std::vector<cv::Size> full_img_tmp_size(num_images);
 #pragma omp parallel for
 	for (int i = 0; i < num_images; i++)
-		full_img[i] = cv::imread(dir + img_name[i]);
+		full_img[i] = cv::imread(img_name[i]);
 	sort(full_img_tmp_size.begin(), full_img_tmp_size.end(), compareCvSize);
 	full_img_sizes = full_img_tmp_size[0];
 	if (compareCvSize(full_img_tmp_size[0], full_img_tmp_size[num_images - 1]))
@@ -857,13 +898,15 @@ void Stitcher::feed(const std::string& dir) {
 		for (int i = 0; i < num_images; i++)
 			resize(full_img[i], full_img[i], full_img_sizes);
 	full_img_tmp_size.clear();
-	rotate_img(dir + img_name[0]);
+	rotate_img(img_name[0]);
 	full_img_sizes = full_img[0].size();
-	matching_mask = cv::Mat(num_images, num_images, CV_8U, cv::Scalar(0));
+	if (!pairwise.empty()) {
+		matching_mask = cv::Mat(num_images, num_images, CV_8U, cv::Scalar(0));
 #pragma omp parallel for
-	for (unsigned int i = 0; i < pairwise.size(); i++)
-		matching_mask.at<unsigned char>(pairwise[i].first, pairwise[i].second) =
-				1;
+		for (unsigned int i = 0; i < pairwise.size(); i++)
+			matching_mask.at<unsigned char>(pairwise[i].first,
+					pairwise[i].second) = 1;
+	}
 }
 
 void Stitcher::set_dst(const std::string &dst) {
