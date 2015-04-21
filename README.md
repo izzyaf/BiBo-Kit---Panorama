@@ -18,6 +18,13 @@ Test case: https://drive.google.com/file/d/0B4hX31GyxRr9ejI5WG1Ud1RlYm8/view?usp
 
 #CHANGELOG:
 
+21/4/2015: v1.1RC1
+- Tự động quét thư mục tìm ảnh khi pairwise.txt không tồn tại
+
+20/4/2015:
+- Tối ưu quản lý bộ nhớ
+- Thay đổi kiểu nhập matching mask
+
 13/04/2015:
 - Giảm bộ nhớ sử dụng
 - Xử lý bộ ảnh đầu vào không đồng đều
