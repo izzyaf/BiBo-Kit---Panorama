@@ -102,9 +102,9 @@ void Stitcher::match_pairwise(std::vector<cv::detail::ImageFeatures>& features,
 	for (auto i : pairwise_matches)
 	if (i.src_img_idx < i.dst_img_idx) {
 	printf("	%d %d: %d\n", i.src_img_idx, i.dst_img_idx, i.num_inliers);
+	}
 #endif
 	matcher.collectGarbage();
-	}
 }
 
 void Stitcher::estimate_camera(std::vector<cv::detail::ImageFeatures>& features,
@@ -1069,4 +1069,3 @@ std::string Stitcher::get_status() {
 
 Stitcher::~Stitcher() {
 }
-
