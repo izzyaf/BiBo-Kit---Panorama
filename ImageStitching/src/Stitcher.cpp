@@ -885,6 +885,7 @@ void Stitcher::feed(const std::string& dir) {
 		}
 
 	}
+	//Resize and rotate all images to a fixed sizes
 	num_images = img_name.size();
 	full_img.resize(num_images);
 	std::vector<cv::Size> full_img_tmp_size(num_images);
@@ -900,6 +901,10 @@ void Stitcher::feed(const std::string& dir) {
 	full_img_tmp_size.clear();
 	rotate_img(img_name[0]);
 	full_img_sizes = full_img[0].size();
+#if ON_LOGGER
+			printf("	Input sizes: %dx%d\n", full_img_sizes.height, full_img_sizes.width);
+#endif
+	//Set matching mask
 	if (!pairwise.empty()) {
 		matching_mask = cv::Mat(num_images, num_images, CV_8U, cv::Scalar(0));
 #pragma omp parallel for
