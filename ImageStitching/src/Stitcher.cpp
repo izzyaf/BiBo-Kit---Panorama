@@ -35,10 +35,12 @@ void Stitcher::find_features(std::vector<cv::detail::ImageFeatures>& features) {
 
 #pragma omp parallel for
 	for (int i = 0; i < num_images; ++i) {
-		if (registration_resol <= 0)
-			img[i] = full_img[i];
-		else
-			cv::resize(full_img[i], img[i], cv::Size(), work_scale, work_scale);
+		if (registration_resol <= 0) {
+				img[i] = full_img[i];
+			}
+		else {
+				cv::resize(full_img[i], img[i], cv::Size(), work_scale, work_scale);
+			}
 		(*finder)(img[i], features[i]);
 #if ON_DETAIL
 		printf("	i%d %dx%d: %d features\n", i, img[i].rows, img[i].cols,
@@ -98,11 +100,11 @@ void Stitcher::match_pairwise(std::vector<cv::detail::ImageFeatures>& features,
 	}
 #if ON_DETAIL
 	for (auto i : pairwise_matches)
-	if (i.src_img_idx < i.dst_img_idx)
+	if (i.src_img_idx < i.dst_img_idx) {
 	printf("	%d %d: %d\n", i.src_img_idx, i.dst_img_idx, i.num_inliers);
 #endif
 	matcher.collectGarbage();
-
+	}
 }
 
 void Stitcher::estimate_camera(std::vector<cv::detail::ImageFeatures>& features,
@@ -158,15 +160,19 @@ void Stitcher::refine_camera(
 	int focal_end = focals.size();
 	while (focal_end > 0) {
 		int focal_mid = focals.size() / 2;
-		if (focals.size() % 2 == 1)
+		if (focals.size() % 2 == 1) {
 			warped_image_scale = static_cast<float>(focals[focal_mid]);
-		else
+		}
+		else {
 			warped_image_scale = static_cast<float>(focals[focal_mid - 1]
 					+ focals[focal_mid]) * 0.5f;
-		if (isnan(warped_image_scale))
+		}
+		if (isnan(warped_image_scale)) {
 			focal_end = focal_mid;
-		else
+		}
+		else {
 			break;
+		}
 	}
 
 #if ON_LOGGER
@@ -338,9 +344,10 @@ double Stitcher::resize_mask(const cv::Ptr<cv::WarperCreator>& warper_creator,
 #endif
 	double compose_scale = 1;
 	double compose_work_aspect = 1;
-	if (compositing_resol > 0)
+	if (compositing_resol > 0) {
 		compose_scale = std::min(1.0,
 				sqrt(compositing_resol * 1e6 / full_img[0].size().area()));
+	}
 
 	// Compute relative scales
 	compose_work_aspect = compose_scale / work_scale;
@@ -385,10 +392,12 @@ cv::Ptr<cv::detail::Blender> Stitcher::prepare_blender(
 			blend_type, false);
 	cv::Size dst_sz = cv::detail::resultRoi(corners, sizes).size();
 	float blend_width = sqrt(static_cast<float>(dst_sz.area())) * 5 / 100.f;
-	if (blend_width < 1.f)
+	if (blend_width < 1.f) {
 		blender = cv::detail::Blender::createDefault(cv::detail::Blender::NO,
 		false);
-	else if (blend_type == cv::detail::Blender::MULTI_BAND) {
+	}
+	else {
+		if (blend_type == cv::detail::Blender::MULTI_BAND) {
 		cv::detail::MultiBandBlender* mb =
 				dynamic_cast<cv::detail::MultiBandBlender*>(static_cast<cv::detail::Blender*>(blender));
 		mb->setNumBands(
@@ -397,15 +406,17 @@ cv::Ptr<cv::detail::Blender> Stitcher::prepare_blender(
 		printf("	Number of bands: %d\n", mb->numBands());
 #endif
 
-	} else if (blend_type == cv::detail::Blender::FEATHER) {
+	} else {
+		if (blend_type == cv::detail::Blender::FEATHER) {
 		cv::detail::FeatherBlender* fb =
 				dynamic_cast<cv::detail::FeatherBlender*>(static_cast<cv::detail::Blender*>(blender));
 		fb->setSharpness(1.f / blend_width);
 #if ON_LOGGER
 		printf("	Sharpness: %f\n", fb->sharpness());
 #endif
+			}
+		}
 	}
-
 	blender->prepare(corners, sizes);
 
 	return blender;
@@ -518,8 +529,9 @@ int Stitcher::registration(std::vector<cv::detail::CameraParams>& cameras) {
 	// Check if we still have enough images
 	int tmp = static_cast<int>(images.size());
 	status.second = double(tmp) / num_images;
-	if (tmp < 2)
+	if (tmp < 2) {
 		return -1;
+	}
 	if (tmp < num_images) {
 		num_images = tmp;
 		retVal = 0;
@@ -685,8 +697,9 @@ int Stitcher::rotate_img(const std::string& img_path) {
 			throw Exiv2::Error(1, "No exif data found!");
 		Exiv2::ExifData::const_iterator i = exifData.findKey(
 				Exiv2::ExifKey("Exif.Image.Orientation"));
-		if (i == exifData.end())
+		if (i == exifData.end()) {
 			throw Exiv2::Error(2, "Orientation not found!");
+		}
 		int angle = i->value().toLong();
 		switch (angle) {
 		case 8: {
@@ -894,10 +907,11 @@ void Stitcher::feed(const std::string& dir) {
 		full_img[i] = cv::imread(img_name[i]);
 	sort(full_img_tmp_size.begin(), full_img_tmp_size.end(), compareCvSize);
 	full_img_sizes = full_img_tmp_size[0];
-	if (compareCvSize(full_img_tmp_size[0], full_img_tmp_size[num_images - 1]))
+	if (compareCvSize(full_img_tmp_size[0], full_img_tmp_size[num_images - 1])) {
 #pragma omp parallel for
 		for (int i = 0; i < num_images; i++)
 			resize(full_img[i], full_img[i], full_img_sizes);
+	}
 	full_img_tmp_size.clear();
 	rotate_img(img_name[0]);
 	full_img_sizes = full_img[0].size();
@@ -924,19 +938,23 @@ std::string Stitcher::get_dst() {
 
 void Stitcher::stitching_process(cv::Mat& result) {
 	enum ReturnCode retVal = OK;
-	if (full_img.size() < 2)
+	if (full_img.size() < 2) {
 		retVal = NEED_MORE;
+	}
 	else {
 		cv::vector<cv::detail::CameraParams> cameras;
 		int check = registration(cameras);
-		if (check == -1)
+		if (check == -1) {
 			retVal = FAILED;
+		}
 		else {
-			if (check == 0)
+			if (check == 0) {
 				retVal = NOT_ENOUGH;
+			}
 			result = compositing(cameras);
-			if (result.rows * result.cols == 1)
+			if (result.rows * result.cols == 1) {
 				retVal = FAILED;
+			}
 		}
 		cameras.clear();
 	}
@@ -962,8 +980,9 @@ void Stitcher::stitch() {
 #if ON_LOGGER
 	printf("%d %lf\n\n", status.first, status.second);
 #endif
-	if (status.first == NEED_MORE)
+	if (status.first == NEED_MORE) {
 		return;
+	}
 	if (status.first != OK) {
 		cv::Mat retry;
 		collect_garbage();
@@ -985,11 +1004,14 @@ void Stitcher::stitch() {
 			break;
 		case NOT_ENOUGH:
 			if (tmp_code.first == status.first
-					&& tmp_code.second < status.second)
+					&& tmp_code.second < status.second) {
 				result = retry.clone();
-			else
+			}
+			else {
 				status = tmp_code;
+			}
 			break;
+			
 		case FAILED:
 			status = tmp_code;
 			break;
@@ -1009,10 +1031,12 @@ void Stitcher::stitch() {
 		{
 			double scale = double(1080) / result.rows;
 			cv::Mat preview;
-			if (scale < 1.25f)
+			if (scale < 1.25f) {
 				cv::resize(result, preview, cv::Size(), scale, scale);
-			else
+			}
+			else {
 				preview = result.clone();
+			}
 			std::vector<int> compression_para;
 			compression_para.push_back(CV_IMWRITE_JPEG_QUALITY);
 			compression_para.push_back(75);
