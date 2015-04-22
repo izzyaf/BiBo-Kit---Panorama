@@ -871,7 +871,7 @@ void Stitcher::feed(const std::string& input_dir) {
 			ifs >> src_img >> dst_img;
 			unsigned int i = 0;
 			for (i = 0; i < img_name.size(); i++) {
-				if (img_name[i].find(src_img) != std::string::npos) {
+				if (img_name[i].substr(img_name[i].find_last_of('/')+1) == src_img) {
 					src_idx = i;
 					break;
 				}
@@ -882,7 +882,7 @@ void Stitcher::feed(const std::string& input_dir) {
 			}
 			i = 0;
 			for (i = 0; i < img_name.size(); i++) {
-				if (img_name[i].find(dst_img) != std::string::npos) {
+				if (img_name[i].substr(img_name[i].find_last_of('/')+1) == dst_img) {
 					dst_idx = i;
 					break;
 				}
@@ -893,6 +893,9 @@ void Stitcher::feed(const std::string& input_dir) {
 			}
 			if (src_idx > dst_idx)
 				std::swap(src_idx, dst_idx);
+#if ON_LOGGER
+		printf("%d %d\n", src_idx, dst_idx);
+#endif
 			pairwise.push_back(std::make_pair(src_idx, dst_idx));
 		}
 		ifs.close();
