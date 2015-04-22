@@ -89,7 +89,10 @@ private:
 	enum SeamFindType seam_find_type;
 
 	//Stitcher class's initialization with argument
-	void init();
+	enum InitMode {
+		FAST, NORMAL
+	};
+	void init(const InitMode&);
 	//Input matching mask from file
 	void set_matching_mask(const std::string&,
 			std::vector<std::pair<int, int> >&) __attribute__ ((deprecated));;
@@ -162,7 +165,7 @@ public:
 	//Stitcher class's constructor with no argument
 	Stitcher();
 
-	//Set input and output directories, both have same name
+	//Set output directory
 	void set_dst(const std::string&);
 	//Get output directory's name
 	std::string get_dst();

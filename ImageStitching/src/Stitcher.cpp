@@ -391,7 +391,7 @@ cv::Ptr<cv::detail::Blender> Stitcher::prepare_blender(
 	float blend_width = sqrt(static_cast<float>(dst_sz.area())) * 5 / 100.f;
 	if (blend_width < 1.f) {
 		blender = cv::detail::Blender::createDefault(cv::detail::Blender::NO,
-				false);
+		false);
 	} else {
 		if (blend_type == cv::detail::Blender::MULTI_BAND) {
 			cv::detail::MultiBandBlender* mb =
@@ -429,6 +429,9 @@ void Stitcher::blend_img(const double& compose_scale,
 	img.resize(num_images);
 #pragma omp parallel for
 	for (int img_idx = 0; img_idx < num_images; ++img_idx) {
+#if ON_DETAIL
+		printf("	Resize image\n");
+#endif
 		// Read image and resize it if necessary
 		if (abs(compose_scale - 1) > 1e-1) {
 			cv::resize(full_img[img_idx], img[img_idx], cv::Size(),
@@ -440,7 +443,9 @@ void Stitcher::blend_img(const double& compose_scale,
 
 		cv::Mat K;
 		cameras[img_idx].K().convertTo(K, CV_32F);
-
+#if ON_DETAIL
+		printf("	Warp image\n");
+#endif
 		// Warp the current image
 		cv::Ptr<cv::detail::RotationWarper> warper = warper_creator->create(
 				warped_image_scale);
@@ -448,6 +453,9 @@ void Stitcher::blend_img(const double& compose_scale,
 		warper->warp(img[img_idx], K, cameras[img_idx].R, cv::INTER_LINEAR,
 				cv::BORDER_REFLECT, img_warped);
 
+#if ON_DETAIL
+		printf("	Warp mask\n");
+#endif
 		// Warp the current image mask
 		cv::Mat mask;
 		mask.create(img_size, CV_8U);
@@ -456,6 +464,9 @@ void Stitcher::blend_img(const double& compose_scale,
 		warper->warp(mask, K, cameras[img_idx].R, cv::INTER_NEAREST,
 				cv::BORDER_CONSTANT, mask_warped);
 		mask.release();
+#if ON_DETAIL
+		printf("	Compensate exposure\n");
+#endif
 		// Compensate exposure
 		compensator->apply(img_idx, corners[img_idx], img_warped, mask_warped);
 		cv::Mat img_warped_s;
@@ -637,10 +648,10 @@ Stitcher::Stitcher() {
 #if ON_LOGGER
 	printf("Create stitcher using no argument\n");
 #endif
-	init();
+	init(FAST);
 }
 
-void Stitcher::init() {
+void Stitcher::init(const Stitcher::InitMode& mode) {
 	warped_image_scale = 1.0;
 	num_images = full_img.size();
 	blend_type = cv::detail::Blender::MULTI_BAND;
@@ -649,9 +660,16 @@ void Stitcher::init() {
 	warp_type = CYLINDRICAL;
 	seam_find_type = DP_COLORGRAD;
 	expos_comp_type = cv::detail::ExposureCompensator::GAIN;
-	registration_resol = 0.6;
-	seam_estimation_resol = 0.08;
+	switch (mode) {
+	case NORMAL:
+		registration_resol = 0.6;
+		break;
+	case FAST:
+		registration_resol = 0.3;
+		break;
+	}
 	confidence_threshold = 1.0;
+	seam_estimation_resol = 0.08;
 	compositing_resol = -1.0;
 	matching_mask = cv::Mat(1, 1, CV_8U, cv::Scalar(0));
 	status = {OK, -1};
@@ -836,10 +854,10 @@ int Stitcher::rotate_img(const std::string& img_path) {
  }
  }*/
 
-void Stitcher::feed(const std::string& dir) {
+void Stitcher::feed(const std::string& input_dir) {
 	num_images = 0;
 	struct stat buf;
-	std::string pairwise_path = dir + "pairwise.txt";
+	std::string pairwise_path = input_dir + "pairwise.txt";
 	std::vector<std::string> img_name;
 	std::vector<std::pair<int, int>> pairwise;
 	if (stat(pairwise_path.c_str(), &buf) != -1) {
@@ -860,7 +878,7 @@ void Stitcher::feed(const std::string& dir) {
 			}
 			if (i == img_name.size()) {
 				src_idx = img_name.size();
-				img_name.push_back(dir + src_img);
+				img_name.push_back(input_dir + src_img);
 			}
 			i = 0;
 			for (i = 0; i < img_name.size(); i++) {
@@ -871,8 +889,10 @@ void Stitcher::feed(const std::string& dir) {
 			}
 			if (i == img_name.size()) {
 				dst_idx = img_name.size();
-				img_name.push_back(dir + dst_img);
+				img_name.push_back(input_dir + dst_img);
 			}
+			if (src_idx > dst_idx)
+				std::swap(src_idx, dst_idx);
 			pairwise.push_back(std::make_pair(src_idx, dst_idx));
 		}
 		ifs.close();
@@ -880,13 +900,13 @@ void Stitcher::feed(const std::string& dir) {
 #if ON_LOGGER
 		printf("Scan directory to find input images\n");
 #endif
-		boost::filesystem::path dir_path(dir);
+		boost::filesystem::path dir_path(input_dir);
 		std::string supported_format =
 				".jpg .jpeg .jpe .jp2 .png .bmp .dib .tif .tiff .pbm .pgm .ppm .sr .ras";
 		try {
 			if (boost::filesystem::exists(dir_path)
 					&& boost::filesystem::is_directory(dir_path)) {
-				boost::filesystem::directory_iterator it(dir);
+				boost::filesystem::directory_iterator it(input_dir);
 				while (it != boost::filesystem::directory_iterator()) {
 					boost::filesystem::path file_path = it->path();
 					if ((boost::filesystem::is_regular_file(file_path))) {
@@ -901,21 +921,24 @@ void Stitcher::feed(const std::string& dir) {
 					}
 					it++;
 				}
+				std::sort(img_name.begin(), img_name.end());
 			}
 		} catch (const boost::filesystem::filesystem_error& ex) {
 #if ON_LOGGER
-			printf("Error when processing files.\n");
+			printf("%s\n", ex.what());
 #endif
-			return;
 		}
 	}
 	//Resize and rotate all images to a fixed sizes
 	num_images = img_name.size();
+	if (num_images < 2)
+		return;
 	full_img.resize(num_images);
 	std::vector<cv::Size> full_img_tmp_size(num_images);
 #pragma omp parallel for
 	for (int i = 0; i < num_images; i++) {
 		full_img[i] = cv::imread(img_name[i]);
+		full_img_tmp_size[i] = full_img[i].size();
 	}
 	sort(full_img_tmp_size.begin(), full_img_tmp_size.end(), compareCvSize);
 	full_img_sizes = full_img_tmp_size[0];
@@ -1000,7 +1023,7 @@ void Stitcher::stitch() {
 	if (status.first != OK) {
 		cv::Mat retry;
 		collect_garbage();
-		init();
+		init(NORMAL);
 		full_img = img_bak;
 		num_images = full_img.size();
 #if ON_LOGGER
